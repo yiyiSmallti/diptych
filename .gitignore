@@ -1,0 +1,3 @@
+*.tgz
+e2e/report/*.tmp
+.DS_Store

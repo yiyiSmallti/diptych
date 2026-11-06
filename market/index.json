@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "title": { "en": "Diptych", "zh": "双联画" },
+  "description": {
+    "en": "A co-op puzzle platformer for DeepSeek Harness: you play one hero in the dsh web side bar, the agent plays the other.",
+    "zh": "DeepSeek Harness 的双人解谜平台游戏：你在 dsh web 右侧栏控一个角色，Agent 控另一个。"
+  },
+  "metadata": {
+    "categories": {
+      "games": { "title": { "en": "Games", "zh": "游戏" } }
+    },
+    "labels": {
+      "web": { "title": { "en": "dsh web", "zh": "dsh web" } },
+      "agent-tools": { "title": { "en": "Agent tools", "zh": "Agent 工具" } }
+    }
+  },
+  "plugins": [
+    {
+      "name": "@precinct/diptych",
+      "title": { "en": "Diptych: play with your agent", "zh": "双联画：和 Agent 一起玩" },
+      "description": {
+        "en": "Fire and ice: a two-player puzzle platformer in the dsh web side bar. You play one hero with the keyboard; the agent plays the other through its tools, talks to you, and waits on the button while you cross.",
+        "zh": "火与冰的双人解谜平台游戏：你用键盘控一个角色，Agent 通过工具控另一个，会说话、会等你，踩住按钮让你过去。"
+      },
+      "icon": "icon.svg",
+      "author": "Precinct series contributors",
+      "homepage": "https://github.com/yiyiSmallti/diptych#readme",
+      "repository": { "url": "https://github.com/yiyiSmallti/diptych", "directory": "plugin" },
+      "metadata": {
+        "category": "games",
+        "keywords": ["game", "co-op", "platformer", "puzzle", "游戏", "双人", "解谜", "冰火"],
+        "labels": ["web", "agent-tools"]
+      },
+      "versions": []
+    }
+  ]
+}

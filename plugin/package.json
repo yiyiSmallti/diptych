@@ -1,0 +1,67 @@
+{
+  "name": "@precinct/diptych",
+  "version": "0.1.0",
+  "description": "双联画：dsh web 右侧栏里的火与冰双人解谜平台游戏，你和 Agent 各控一个角色一起过关",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "dsh-bundle",
+    "deepseek",
+    "deepseek-harness",
+    "game",
+    "co-op",
+    "platformer",
+    "puzzle",
+    "agent-tools"
+  ],
+  "author": "Precinct series contributors",
+  "homepage": "https://github.com/yiyiSmallti/diptych#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yiyiSmallti/diptych.git",
+    "directory": "plugin"
+  },
+  "bugs": {
+    "url": "https://github.com/yiyiSmallti/diptych/issues"
+  },
+  "license": "MIT",
+  "icon": "icon.svg",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./engine": "./lib/engine.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*": "./locale/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "art",
+    "cordis.patch.yml",
+    "icon.svg",
+    "locale",
+    "README.md"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.5 <0.3.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar-right",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-api-session-controller"
+      ]
+    }
+  },
+  "dependencies": {},
+  "publishConfig": {
+    "access": "public"
+  }
+}

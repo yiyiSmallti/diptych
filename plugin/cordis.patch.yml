@@ -1,0 +1,5 @@
+# diptych bundle: the co-op game's Agent tools (diptych_look, diptych_act,
+# diptych_wait) and the relay the game tab in dsh web syncs with.
+- insert:
+    - id: diptych
+      name: '@precinct/diptych'
