@@ -89,7 +89,7 @@ export function apply (ctx) {
     {
       name: 'diptych_act',
       description: 'Move your hero in the Diptych game and/or talk. The autopilot walks and jumps for you; the call returns when the move is done (or failed, with why), so you can chain moves. Actions:\n' +
-        '- go: walk/jump to target and stop there. target: an object id from diptych_look (a button, lever, lift, or a gate to stand next to), "exit", "partner", "gem" (your nearest gem), a gem id like "e1"/"r2", or {x, y}. Standing on a button keeps it pressed until you leave.\n' +
+        '- go: walk/jump to target and stop there. target: an object id from diptych_look (a button, lever, lift, or a gate to stand next to), "exit", "partner", "gem" (your nearest gem), a gem id like "e1"/"r2", or a cell as the string "x,y" (column,row from the map, e.g. "12,9"). Standing on a button keeps it pressed until you leave.\n' +
         '- pull: go to a lever (target) and toggle it.\n' +
         '- jump: one jump, dir left/right/up. walk: dir left/right, tiles n.\n' +
         '- stop: stop where you are. restart: restart the level. next: go to the next level now after a win (the game also moves on by itself a few seconds after a win, unless the user chooses to stay).\n' +
@@ -99,7 +99,7 @@ export function apply (ctx) {
         type: 'object',
         properties: {
           action: { type: 'string', enum: ['go', 'pull', 'jump', 'walk', 'stop', 'say', 'restart', 'next'] },
-          target: { description: 'For go/pull: an object id, "exit", "partner", "gem", a gem id, or {x, y}.' },
+          target: { type: 'string', description: 'For go/pull: an object id, "exit", "partner", "gem", a gem id, or a cell as "x,y" (e.g. "12,9") — always a plain string.' },
           dir: { type: 'string', enum: ['left', 'right', 'up'] },
           tiles: { type: 'integer', minimum: 1, maximum: 30 },
           say: { type: 'string', description: 'A short line to say to your partner (≤ 60 characters), in your hero\'s voice: warm and lively, like a friend playing with them.' }

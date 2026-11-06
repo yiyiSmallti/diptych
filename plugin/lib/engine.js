@@ -540,9 +540,12 @@ function pathTo (res) {
 }
 
 // Targets the Agent (or a test) can name: an object id, exit, partner,
-// gem (the nearest gem of one's own colour), or a cell {x, y}.
+// gem (the nearest gem of one's own colour), or a cell: "x,y" from the
+// Agent's tools, {x, y} from the solver and tests.
 export function resolveTarget (W, kind, target) {
   const L = W.L
+  const xy = typeof target === 'string' ? /^\s*\(?\s*(-?\d+)\s*[,，\s]\s*(-?\d+)\s*\)?\s*$/.exec(target) : null
+  if (xy) target = { x: +xy[1], y: +xy[2] }
   if (target && typeof target === 'object' && Number.isFinite(+target.x) && Number.isFinite(+target.y)) {
     return { label: `(${+target.x},${+target.y})`, cells: [{ x: +target.x, y: +target.y }] }
   }
@@ -565,7 +568,7 @@ export function resolveTarget (W, kind, target) {
     return { label: `宝石 ${gem.id}`, cells: [{ x: gem.x, y: gem.y, touch: true }] }
   }
   const o = L.byId.get(t) ?? L.byId.get(t.toUpperCase()) ?? L.byId.get(t.toLowerCase())
-  if (!o) return { error: `没有叫 ${t} 的东西；可以用对象编号、exit、partner、gem 或 {x, y}` }
+  if (!o) return { error: `没有叫 ${t} 的东西；可以用对象编号、exit、partner、gem、宝石编号或坐标 "x,y"` }
   if (o.type === 'button' || o.type === 'lever') return { label: `${o.type === 'button' ? '按钮' : '拉杆'} ${o.id}`, cells: [{ x: o.x, y: o.y }], obj: o }
   if (o.type === 'lift') {
     const y = Math.round(W.lifts[o.id]) - 1

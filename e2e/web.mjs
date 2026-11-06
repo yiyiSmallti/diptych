@@ -76,7 +76,7 @@ function agentBrain () {
   const act = (input) => ({ name: 'diptych_act', input })
   const steps = [
     { call: { name: 'diptych_look', input: {} } },
-    { call: act({ action: 'go', target: { x: 15, y: 5 }, say: '我先爬上中间层～你去踩黄灯那个 b？' }) },
+    { call: act({ action: 'go', target: '15,5', say: '我先爬上中间层～你去踩黄灯那个 b？' }) },
     { call: { name: 'diptych_wait', input: { seconds: 30 } }, until: (t) => t.includes('闸门 A 开了') || /A开/.test(t) },
     { call: act({ action: 'pull', target: 'l', say: '谢啦！门开了，我去拉拉杆～' }) },
     { call: act({ action: 'go', target: 'exit', say: '好耶，B 开啦！出口见 ✨' }) },
