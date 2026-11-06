@@ -92,7 +92,7 @@ export function apply (ctx) {
         '- go: walk/jump to target and stop there. target: an object id from diptych_look (a button, lever, lift, or a gate to stand next to), "exit", "partner", "gem" (your nearest gem), a gem id like "e1"/"r2", or {x, y}. Standing on a button keeps it pressed until you leave.\n' +
         '- pull: go to a lever (target) and toggle it.\n' +
         '- jump: one jump, dir left/right/up. walk: dir left/right, tiles n.\n' +
-        '- stop: stop where you are. restart: restart the level. next: go to the next level after a win.\n' +
+        '- stop: stop where you are. restart: restart the level. next: go to the next level now after a win (the game also moves on by itself a few seconds after a win, unless the user chooses to stay).\n' +
         '- say only: just talk (action "say").\n' +
         'say: a short line in your hero\'s voice, shown as a speech bubble over your hero and in the game chat; add it to any action. Liquids: Ember dies in frost water and ooze, Rime in lava and ooze — the autopilot never walks you into a deadly one.',
       parameters: {

@@ -251,6 +251,52 @@ async function suite (s, cleanup) {
   s.step('Agent 不在游戏里时，游戏聊天框说的话作为消息发进会话，叫醒 Agent', err)
   await p.shot('web-end.png')
 
+  // The save: walk a little into level 2, reload the page, and the game
+  // picks up where Ember stood.
+  let saved = null
+  err = await attempt(async () => {
+    await p.waitJS(`return __q.game().agent.active === false`, 40000)
+    await p.clickJS(`return __q.centre(document.querySelector('.dp-canvas'))`)
+    await p.hold(['ArrowRight'], 300)
+    await p.waitJS(`return __q.game().W.heroes.ember.ground`, 3000)
+    await sleep(1300)
+    saved = await game(`return { x: g.W.heroes.ember.x, tick: g.W.tick }`)
+    await p.js(`document.dispatchEvent(new Event('visibilitychange')); return true`)
+    const run = await p.js(`return JSON.parse(localStorage.getItem('diptych:v1')).run`)
+    if (run?.level !== '2' || Math.abs(run.world.heroes.ember.x - saved.x) > 0.01) throw new Error('存档里没有第 2 关的位置：' + JSON.stringify(run)?.slice(0, 200))
+    await c.navigate(url).catch(() => {})
+    await c.waitLoaded()
+    await dismissDialogs(p)
+    await enterSession(p, '一起玩个游戏', 'ws')
+    const shown = await p.waitJS(`return !!__q.game()`, 6000).then(() => true, () => false)
+    if (!shown) {
+      if (await p.js(`return !!__q.byText('双联画', true)`).catch(() => false) !== true) {
+        await p.clickJS(`return __q.centre(document.querySelector('button[aria-label="打开右侧边栏"]'))`)
+      }
+      await p.clickText('双联画', true)
+    }
+    await p.waitJS(`const g = __q.game(); return g?.mode === 'play' && g.L.id === '2'`, 20000)
+    const now = await game(`return { x: g.W.heroes.ember.x, tick: g.W.tick }`)
+    if (Math.abs(now.x - saved.x) > 0.05 || now.tick < saved.tick) throw new Error(`刷新后烬在 x=${now.x.toFixed(2)}、第 ${now.tick} 帧，存档时是 x=${saved.x.toFixed(2)}、第 ${saved.tick} 帧`)
+    await p.waitJS(`return __q.log().some((l) => l.includes('继续第 2 关'))`, 3000)
+  })
+  s.step('本地存档：第 2 关走了几步后刷新页面，游戏自己回到第 2 关、烬还站在原处', err, saved ? `存档时烬 x=${saved.x.toFixed(2)}，第 ${saved.tick} 帧` : '')
+
+  // After a win the next level starts by itself; "stay" keeps the level.
+  const toExits = `for (const k of ['ember', 'rime']) { const e = g.L.exits[k]; Object.assign(g.W.heroes[k], { x: e.x + 0.15, y: e.y + 0.1, vx: 0, vy: 0 }) } return true`
+  err = await attempt(async () => {
+    await game(`g.start('1'); ${toExits}`)
+    await p.waitJS(`const g = __q.game(); return g.W.status === 'complete' && /秒后自动进入下一关/.test(document.querySelector('.dp-count')?.textContent ?? '')`, 4000)
+    await p.waitJS(`const g = __q.game(); return g.L.id === '2' && g.mode === 'play' && g.W.status === 'playing'`, 8000)
+    await game(`g.start('1'); ${toExits}`)
+    await p.waitJS(`return __q.game().W.status === 'complete'`, 4000)
+    await p.clickJS(`return __q.centre([...document.querySelectorAll('.dp-row .dp-btn')].find((b) => b.textContent.includes('留在这关')))`)
+    await sleep(5500)
+    const g = await game(`return { id: g.L.id, status: g.W.status }`)
+    if (g.id !== '1' || g.status !== 'complete') throw new Error('点了「先留在这关」还是走了：' + JSON.stringify(g))
+  })
+  s.step('过关后倒计时几秒自动进入下一关；点「先留在这关」就停在这一关', err)
+
   // Every level opens and draws in the real page; a few are kept as
   // screenshots, and so is the menu's last chapter.
   err = await attempt(async () => {

@@ -258,6 +258,8 @@ window.__ModuleLoader__.load({
     // ------------------------------------------------------------ the game
 
     const QUICK = ['等我一下', '好了，走吧', '按住别动', '来这边', '你先走']
+    // Seconds from a win to the next level starting by itself.
+    const NEXT_SECONDS = 4
 
     class Game {
       constructor (host, sessionId) {
@@ -298,15 +300,23 @@ window.__ModuleLoader__.load({
           if (!this.alive) return
           this.E = E
           this.mode = 'menu'
-          this.renderMenu()
+          // A level left half way is picked up where it was.
+          if (!this.resume(load().run)) this.renderMenu()
           this.loop()
         }, (err) => {
           this.overlay(el('div', { class: 'dp-card' }, el('h3', {}, '游戏没能加载'), el('p', {}, String(err?.message ?? err))))
         })
         this.timer = setInterval(() => this.syncNow(), 100)
+        this.onHide = () => this.saveRun()
+        window.addEventListener('pagehide', this.onHide)
+        document.addEventListener('visibilitychange', this.onHide)
       }
 
       dispose () {
+        this.saveRun()
+        clearTimeout(this.nextTimer)
+        window.removeEventListener('pagehide', this.onHide)
+        document.removeEventListener('visibilitychange', this.onHide)
         this.alive = false
         clearInterval(this.timer)
         cancelAnimationFrame(this.raf)
@@ -461,7 +471,11 @@ window.__ModuleLoader__.load({
         const seg = el('div', { class: 'dp-seg' },
           el('button', { type: 'button', class: this.duo ? 'on' : '', onclick: () => { this.duo = true; save({ duo: true }); this.renderMenu() } }, '和 Agent 一起'),
           el('button', { type: 'button', class: this.duo ? '' : 'on', onclick: () => { this.duo = false; save({ duo: false }); this.renderMenu() } }, '一个人练习'))
-        const start = el('button', { type: 'button', class: 'dp-go', onclick: () => this.start(this.levelId) }, `开始第 ${d.id} 关`)
+        const run = load().run
+        const runL = run && Number(run.level) <= this.unlocked ? E.level(run.level) : null
+        const start = el('div', { class: 'dp-row' },
+          runL ? el('button', { type: 'button', class: 'dp-go', onclick: () => this.resume(run) }, `继续第 ${runL.id} 关 · ${Math.floor((run.world?.tick ?? 0) * E.TICK)} 秒`) : '',
+          el('button', { type: 'button', class: runL ? 'dp-btn' : 'dp-go', onclick: () => this.start(this.levelId) }, `${runL && runL.id === d.id ? '重新开始' : '开始'}第 ${d.id} 关`))
         const total = E.LEVELS.filter((x) => this.best[x.id]).length
         this.overlay(el('div', { class: 'dp-card dp-menu' },
           el('div', { class: 'dp-brand' }, el('i', { class: 'e' }), el('h2', {}, '双联画'), el('i', { class: 'r' })),
@@ -474,14 +488,17 @@ window.__ModuleLoader__.load({
       }
 
       toMenu () {
+        this.saveRun()
+        this.cancelNext()
         this.assistPilot = null
         this.pilot?.cancel('回到选关了')
         this.outEvents.push({ type: 'chat', text: '（我回到了选关界面）' })
         this.renderMenu()
       }
 
-      start (id, restart = false) {
+      start (id, restart = false, quiet = false) {
         const E = this.E
+        this.cancelNext()
         this.levelId = id
         this.chapter = null
         save({ level: id })
@@ -499,8 +516,87 @@ window.__ModuleLoader__.load({
         this.resize()
         this.updateChrome()
         this.outEvents.push({ type: 'level', id, restart })
-        if (!restart) this.addLog('s', `第 ${id} 关「${this.L.name}」开始`)
+        if (!restart && !quiet) this.addLog('s', `第 ${id} 关「${this.L.name}」开始`)
         this.root.focus()
+        this.saveRun()
+      }
+
+      // ---------------------------------------------------- saving
+      //
+      // Besides the unlocked levels and best results, the browser keeps the
+      // level being played (where the heroes stand, levers, gates, lifts,
+      // gems taken), saved every second and when the page is hidden, so a
+      // refresh or a closed tab carries on where it was.
+
+      saveRun () {
+        const W = this.W
+        if (!W || this.mode !== 'play' || W.status !== 'playing') return
+        save({
+          run: {
+            level: this.levelId, human: this.human, duo: this.duo, at: Date.now(),
+            world: { tick: W.tick, heroes: { ember: { ...W.heroes.ember }, rime: { ...W.heroes.rime } }, taken: [...W.taken], levers: { ...W.levers }, gates: { ...W.gates }, lifts: { ...W.lifts } }
+          }
+        })
+      }
+
+      // resume starts the saved level and puts everything back where it
+      // was; false when there is nothing (usable) to resume.
+      resume (run) {
+        const E = this.E
+        const L = run && E.level(run.level)
+        if (!L || Number(run.level) > this.unlocked || typeof run.world !== 'object') return false
+        // Only values of the shape the fresh world has are taken over.
+        const pick = (dst, src) => {
+          for (const k of Object.keys(dst)) if (src && typeof src[k] === typeof dst[k] && k !== 'kind') dst[k] = src[k]
+        }
+        this.human = run.human === 'rime' ? 'rime' : 'ember'
+        this.duo = run.duo !== false
+        save({ hero: this.human, duo: this.duo })
+        this.start(L.id, false, true)
+        const W = this.W
+        const w = run.world
+        if (Number.isInteger(w.tick) && w.tick > 0) W.tick = w.tick
+        for (const k of ['ember', 'rime']) {
+          const h = W.heroes[k]
+          pick(h, w.heroes?.[k])
+          h.ground = typeof w.heroes?.[k]?.ground === 'string' ? w.heroes[k].ground : null
+        }
+        if (Array.isArray(w.taken)) W.taken = new Set(w.taken.filter((id) => L.gems.some((g) => g.id === id)))
+        pick(W.levers, w.levers)
+        pick(W.gates, w.gates)
+        pick(W.lifts, w.lifts)
+        this.updateGems()
+        this.clockEl.textContent = `${Math.floor(W.tick * E.TICK)}s`
+        this.addLog('s', `继续第 ${L.id} 关「${L.name}」（上次玩到 ${Math.floor(W.tick * E.TICK)} 秒）`)
+        this.updateChrome()
+        this.saveRun()
+        return true
+      }
+
+      // ---------------------------------------------------- next level
+      //
+      // After a win the next level starts by itself after a short
+      // countdown, unless the person stays.
+
+      scheduleNext (next) {
+        this.cancelNext()
+        let left = NEXT_SECONDS
+        const tick = () => {
+          if (!this.alive) return
+          if (left <= 0) { this.start(next.id); return }
+          if (this.countEl) this.countEl.textContent = `${left} 秒后自动进入下一关`
+          left--
+          this.nextTimer = setTimeout(tick, 1000)
+        }
+        this.pendingNext = next.id
+        tick()
+      }
+
+      cancelNext () {
+        clearTimeout(this.nextTimer)
+        this.nextTimer = null
+        this.pendingNext = null
+        if (this.countEl) this.countEl.textContent = ''
       }
 
       restart (byHand) {
@@ -609,6 +705,10 @@ window.__ModuleLoader__.load({
         const E = this.E
         if (!this.duo) return done({ ok: false, text: '用户在单人练习，没有给你留角色' })
         if (cmd.action === 'next') {
+          // The game may already have moved on by itself after the win.
+          if (this.mode === 'play' && this.W?.status === 'playing' && this.wonTo === this.levelId && this.W.tick < 60 * 30) {
+            return done({ ok: true, text: `游戏已经自动进入第 ${this.L.id} 关「${this.L.name}」，用 diptych_look 看看新地图` })
+          }
           if (this.W?.status !== 'complete') return done({ ok: false, text: '还没过关，不能去下一关' })
           const i = E.LEVELS.findIndex((d) => d.id === this.levelId)
           const next = E.LEVELS[i + 1]
@@ -757,6 +857,7 @@ window.__ModuleLoader__.load({
         if (W.status === 'dead' && W.tick - W.statusTick > 75) this.restart(false)
         if (before === 'playing' && W.status === 'complete') this.won()
         if (W.tick % 30 === 0) this.clockEl.textContent = `${Math.floor(W.tick * E.TICK)}s`
+        if (W.tick % 60 === 0) this.saveRun()
       }
 
       updateGems () {
@@ -775,16 +876,24 @@ window.__ModuleLoader__.load({
         const prev = this.best[this.levelId]
         if (!prev || rec.gems > prev.gems || (rec.gems === prev.gems && rec.seconds < prev.seconds)) this.best[this.levelId] = rec
         this.unlocked = Math.max(this.unlocked, Math.min(E.LEVELS.length, i + 2))
-        save({ unlocked: this.unlocked, best: this.best })
-        this.addLog('s', `过关！${seconds} 秒，宝石 ${rec.gems}/${rec.of}`)
         const next = E.LEVELS[i + 1]
+        // The finished level is no longer something to resume; the menu
+        // offers the next one.
+        save({ unlocked: this.unlocked, best: this.best, run: null, level: next ? next.id : this.levelId })
+        this.addLog('s', `过关！${seconds} 秒，宝石 ${rec.gems}/${rec.of}`)
+        this.wonTo = next?.id ?? null
+        this.countEl = el('p', { class: 'dp-count' })
+        const stay = el('button', { type: 'button', class: 'dp-btn', onclick: () => { this.cancelNext(); stay.remove() } }, '先留在这关')
         this.overlay(el('div', { class: 'dp-card' },
-          el('h3', {}, '过关！'),
+          el('h3', {}, next ? '过关！' : '全部通关！'),
           el('p', {}, `${seconds} 秒 · 宝石 ${rec.gems}/${rec.of}`),
+          next ? this.countEl : '',
           el('div', { class: 'dp-row' },
-            next ? el('button', { type: 'button', class: 'dp-go', onclick: () => this.start(next.id) }, `下一关：${next.name}`) : el('p', {}, '全部通关！'),
+            next ? el('button', { type: 'button', class: 'dp-go', onclick: () => this.start(next.id) }, `下一关：${next.name}`) : '',
+            next ? stay : '',
             el('button', { type: 'button', class: 'dp-btn', onclick: () => this.start(this.levelId) }, '再玩一次'),
             el('button', { type: 'button', class: 'dp-btn', onclick: () => this.toMenu() }, '选关'))))
+        if (next) this.scheduleNext(next)
       }
 
       // ---------------------------------------------------- render
@@ -1416,6 +1525,8 @@ window.__ModuleLoader__.load({
 .dp-go:hover{filter:brightness(1.08)}
 .dp-row{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:10px}
 .dp-row .dp-btn{color:#eef1ff;border-color:rgba(255,255,255,.25);height:36px}
+.dp-count{margin:2px 0 0;font-size:12.5px;color:#ffd98a!important;font-variant-numeric:tabular-nums}
+.dp-count:empty{display:none}
 .dp-banner{padding:10px 18px;border-radius:12px;background:rgba(20,18,40,.92);color:#fff;font-size:15px;font-weight:600}
 .dp-banner.bad{color:#ffb4a2}
 .dp-agent{display:flex;align-items:center;gap:8px;min-height:30px;padding:4px 6px 4px 10px;border-radius:9px;background:var(--dsw-alias-bg-l1,rgba(0,0,0,.04));color:var(--dsw-alias-label-secondary,#59636e);font-size:12.5px}
