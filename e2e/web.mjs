@@ -76,12 +76,12 @@ function agentBrain () {
   const act = (input) => ({ name: 'diptych_act', input })
   const steps = [
     { call: { name: 'diptych_look', input: {} } },
-    { call: act({ action: 'go', target: { x: 15, y: 5 }, say: '我先上到中间层，你去踩按钮 b' }) },
+    { call: act({ action: 'go', target: { x: 15, y: 5 }, say: '我先爬上中间层～你去踩黄灯那个 b？' }) },
     { call: { name: 'diptych_wait', input: { seconds: 30 } }, until: (t) => t.includes('闸门 A 开了') || /A开/.test(t) },
-    { call: act({ action: 'pull', target: 'l', say: '收到！我去拉拉杆' }) },
-    { call: act({ action: 'go', target: 'exit', say: 'B 开了，出口见' }) },
+    { call: act({ action: 'pull', target: 'l', say: '谢啦！门开了，我去拉拉杆～' }) },
+    { call: act({ action: 'go', target: 'exit', say: '好耶，B 开啦！出口见 ✨' }) },
     { call: { name: 'diptych_wait', input: { seconds: 30 } }, until: (t) => t.includes('过关') },
-    { call: act({ action: 'next', say: '下一关！' }) },
+    { call: act({ action: 'next', say: '配合满分！下一关走起～' }) },
     { call: { name: 'diptych_look', input: {} } }
   ]
   let i = -1
@@ -192,7 +192,7 @@ async function suite (s, cleanup) {
 
   err = await attempt(async () => {
     await p.waitJS(`const g = __q.game(); const h = g.W.heroes.rime; return Math.floor(h.x + 0.35) === 15 && Math.floor(h.y + 0.9 - 1e-9) === 5 && h.ground`, 30000)
-    await p.waitJS(`return __q.log().some((l) => l.includes('我先上到中间层'))`, 5000)
+    await p.waitJS(`return __q.log().some((l) => l.includes('我先爬上中间层'))`, 5000)
   })
   const look = model.results.find((r) => r.text.includes('关卡 1「两条路」'))?.text ?? ''
   s.step('Agent 的 diptych_look 拿到带坐标的地图、对象说明和走得到的目标', check(look.includes(' 8 #') && look.includes('b 按钮 (18,5)') && look.includes('你是凇') && look.includes('你现在走得到'), look.slice(0, 200)))
@@ -226,7 +226,7 @@ async function suite (s, cleanup) {
   })
   s.step('Agent 看到第 2 关的地图后结束这一轮', err)
   const log = await p.js('return __q.log()').catch(() => [])
-  s.step('游戏聊天记下了 Agent 说的话和过关', check(log.some((l) => l.includes('收到！我去拉拉杆')) && log.some((l) => l.includes('过关')), log.join(' / ').slice(0, 300)))
+  s.step('游戏聊天记下了 Agent 说的话和过关', check(log.some((l) => l.includes('谢啦！门开了，我去拉拉杆')) && log.some((l) => l.includes('过关')), log.join(' / ').slice(0, 300)))
   await p.shot('web-level2.png')
 
   // A death: Ember walks into the frost pool; the level restarts.

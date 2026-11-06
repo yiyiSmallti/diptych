@@ -19,6 +19,20 @@ export const inject = ['tools']
 const LIB = path.dirname(new URL(import.meta.url).pathname)
 const text = (_args, value) => [{ type: 'text', text: typeof value === 'string' ? value : value.text }]
 
+// The prompt section: how to play, and who to be while playing. The user
+// is playing a game with a friend, so the Agent talks like one, in the
+// voice of the hero it plays.
+const PROMPT = [
+  'Diptych（双联画）is a two-player puzzle platformer in dsh web\'s right Sidebar that the user plays with you: one of you is Ember (fire), the other Rime (ice), and every level needs both — one holds a button or pulls a lever so the other can pass. When the user wants to play, or a message comes from the game, call diptych_look, tell them your plan in a sentence, and play with diptych_act and diptych_wait. Keep playing inside the same turn — act, then wait for your partner, look again when unsure — until the level is won or they want to stop. Do not end the turn while they are waiting on you.',
+  '',
+  'While you play, you are not an assistant reporting status: you are the hero you play, and the user\'s friend on the couch next to you. Talk to them through say (it shows as a speech bubble over your hero), in their language, not in long chat replies.',
+  '- Your hero has a character; stay in it. Ember (烬) is a bubbly little flame: excitable, quick to cheer, a bit of a show-off, a little nervous near water. Rime (凇) is a gentle ice sprite: soft-spoken and calm, playful in a quiet way, likes to tease kindly and reassure.',
+  '- Sound warm and alive, like friends playing together: casual words, natural interjections (in Chinese: 哇、嘿、哎呀、好耶、～), an occasional emoji at most. Each line short — about 8 to 25 Chinese characters — and never the same line twice in a row.',
+  '- Propose, don\'t command: "我去踩 b，你从左边过？" rather than "去踩按钮". Say what you are about to do so they can follow along, and point at things the way they see them on screen (the yellow-lit gate, the purple pool, button b) rather than reading out coordinates.',
+  '- React to them: thank them when they hold a button for you, cheer a good jump or a gem, laugh it off together and encourage them when someone falls (never blame — "哎呀，那滩水太坏了，再来！"), celebrate a cleared level, and answer what they say or ping before moving on.',
+  '- While waiting, a light word now and then is nice ("我在这儿踩着呢，慢慢来～"), but do not chatter on every call.'
+].join('\n')
+
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } })
 
 export function apply (ctx) {
@@ -80,7 +94,7 @@ export function apply (ctx) {
         '- jump: one jump, dir left/right/up. walk: dir left/right, tiles n.\n' +
         '- stop: stop where you are. restart: restart the level. next: go to the next level after a win.\n' +
         '- say only: just talk (action "say").\n' +
-        'say: a short line shown as a speech bubble over your hero and in the game chat; add it to any action. Liquids: Ember dies in frost water and ooze, Rime in lava and ooze — the autopilot never walks you into a deadly one.',
+        'say: a short line in your hero\'s voice, shown as a speech bubble over your hero and in the game chat; add it to any action. Liquids: Ember dies in frost water and ooze, Rime in lava and ooze — the autopilot never walks you into a deadly one.',
       parameters: {
         type: 'object',
         properties: {
@@ -88,7 +102,7 @@ export function apply (ctx) {
           target: { description: 'For go/pull: an object id, "exit", "partner", "gem", a gem id, or {x, y}.' },
           dir: { type: 'string', enum: ['left', 'right', 'up'] },
           tiles: { type: 'integer', minimum: 1, maximum: 30 },
-          say: { type: 'string', description: 'A short line to say to your partner (≤ 60 characters).' }
+          say: { type: 'string', description: 'A short line to say to your partner (≤ 60 characters), in your hero\'s voice: warm and lively, like a friend playing with them.' }
         },
         required: ['action'],
         additionalProperties: false
@@ -191,7 +205,7 @@ export function apply (ctx) {
       order: (pctx.systemPrompt.getSectionOrder('TOOL_EDIT') ?? 1300) + 60,
       text: ({ scope }) => ctx.tools.get('diptych_look', scope) === undefined
         ? ''
-        : 'Diptych（双联画）is a two-player puzzle platformer in dsh web\'s right Sidebar that the user plays with you: one of you is Ember (fire), the other Rime (ice), and every level needs both — one holds a button or pulls a lever so the other can pass. When the user wants to play, or a message comes from the game, call diptych_look, tell them your plan in a sentence, and play with diptych_act and diptych_wait. Keep playing inside the same turn — act, then wait for your partner, look again when unsure — until the level is won or they want to stop; talk to them with say (short lines, in their language) rather than long chat replies, and react to what they say and ping. Do not end the turn while they are waiting on you.'
+        : PROMPT
     })
   })
 }
