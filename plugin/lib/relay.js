@@ -39,7 +39,8 @@ class Game {
     this.waiters = new Set()
     this.activeUntil = 0
     // Misses: the Agent's failed moves and its hero's deaths on this
-    // level. Past HINT_AFTER the tools add the solver's next moves.
+    // level. Past TIP_AFTER and HINT_AFTER (lib/index.js) the tools add
+    // the level's tip, then the solver's next moves.
     this.misses = 0
     this.hintCache = null
     // The partner's last resting place and who holds which button, so a

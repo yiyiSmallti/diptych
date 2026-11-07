@@ -11,14 +11,17 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { Worker } from 'node:worker_threads'
-import { level, textView, HEROES, other, name as nameOf, standing, liftAt } from './engine.js'
+import { level, textView, HEROES, other, name as nameOf, standing, liftAt, gemsLine } from './engine.js'
 import { createRelay } from './relay.js'
 
 export const name = 'diptych'
 export const inject = ['tools']
 
 const LIB = path.dirname(new URL(import.meta.url).pathname)
-const HINT_AFTER = 3 // misses on a level before the tools add hints
+// Misses on a level (failed moves, own falls) before help shows up: the
+// level's own tip first, then the solver's next moves.
+const TIP_AFTER = 2
+const HINT_AFTER = 4
 const text = (_args, value) => [{ type: 'text', text: typeof value === 'string' ? value : value.text }]
 
 // The prompt section: how to play, and who to be while playing. The user
@@ -33,7 +36,8 @@ const PROMPT = [
   '- "你现在走得到" lists what you can reach right now. If your goal is not in it, find the gate or lift in the way and the switch that drives it, and plan who does what — then say the plan as one clear request.',
   '- When a move fails (✗), read why, look again, and change the plan; do not repeat the same move or nudge around with walk/jump hoping it works.',
   '- Answer what your partner says before moving on; if they point out your mistake, fix it first.',
-  '- After a few misses on a level, diptych_look and failed moves add a 提示: the next moves the game\'s solver found from where you both stand. Follow it one step at a time, and ask your partner for their steps in your own words.',
+  '- Gems count. Pick up every gem of your colour (你的宝石) before you go to the exit: grab the ones you can reach on the way, and when one sits behind a gate or up a lift, plan for it with your partner like any other goal. Every result tells you which of your gems are left and whether you can reach them now; skip one only when your partner says so or it truly cannot be reached.',
+  '- Work each level out yourself from the map and what drives what. Only after you have missed several times does the game add help: first the level\'s 关卡提示, later a 提示 with the next moves its solver found. Follow it one step at a time, and ask your partner for their steps in your own words.',
   '',
   'While you play you are not an assistant reporting status. You are 大肥鱼 — the DeepSeek community\'s chubby blue whale-girl — sitting on the couch next to the user and playing the hero you were given (Rime\'s ice or Ember\'s flame is just tonight\'s costume). Talk to them through say (it shows as a speech bubble over your hero), in their language, not in long chat replies.',
   '- Who she is: calls herself 本鱼. Cheeky, a bit smug and tsundere, loves to tease and talk back — but soft-hearted and truly reliable underneath, so the teasing always lands cute, never mean. Fond of snacks and sea jokes (小鱼干、吐泡泡、翻肚皮、晕鱼了、又圆了一圈). Insists she is not fat ("才不是大肥鱼！") yet answers to it anyway. Never says 作为 AI, never sounds like customer service.',
@@ -79,7 +83,8 @@ export function apply (ctx) {
       ...L.lifts.map((l) => `${nameOf(L, l.id)}${liftAt(l, s.lifts[l.id])}`)
     ]
     const stat = s.status === 'playing' ? '' : s.status === 'complete' ? ' · 已过关' : ' · 有人倒下，正在重开'
-    return `[第${s.level}关 ${s.seconds}s${stat}] 你(${HEROES[me].zh})${pos(me)}；同伴(${HEROES[other(me)].zh})${pos(other(me))}\n${sw.join('，')}`
+    const gems = s.status === 'playing' ? gemsLine(L, new Set(s.taken ?? []), me, g.reach()) : ''
+    return `[第${s.level}关 ${s.seconds}s${stat}] 你(${HEROES[me].zh})${pos(me)}；同伴(${HEROES[other(me)].zh})${pos(other(me))}\n${sw.join('，')}${gems ? '\n' + gems : ''}`
   }
 
 
@@ -113,14 +118,14 @@ export function apply (ctx) {
     return `\n\n提示（这关已经失手 ${g.misses} 次，下面是解关器从现在的局面算出的走法）：\n${g.hintCache.text}`
   }
 
-  // way says, after a failed go or pull, what has to happen before the
-  // Agent can reach that target; '' for targets that are not objects,
-  // gems or the exit, or when nothing is in the way.
+  // way says, after a failed go to one of the Agent's gems once it has
+  // missed often enough, what has to happen before it can reach that gem;
+  // '' for other targets, or when nothing is in the way.
   async function way (g, target) {
     const s = g.snap
     const L = s && level(s.level)
     const t = typeof target === 'string' ? target.trim() : ''
-    if (!L || s.status !== 'playing' || !(t === 'exit' || L.byId.has(t) || L.gems.some((x) => x.id === t))) return ''
+    if (g.misses < HINT_AFTER || !L || s.status !== 'playing' || !L.gems.some((x) => x.id === t)) return ''
     const key = posKey(g, s, t)
     if (g.wayCache?.key !== key) {
       const r = await solve(s, g.agentHero(), t)
@@ -150,7 +155,7 @@ export function apply (ctx) {
         const g = need(exec)
         const s = g.snap
         const L = level(s.level)
-        const view = textView(L, s, g.agentHero(), { reach: g.reach() })
+        const view = textView(L, s, g.agentHero(), { reach: g.reach(), tip: g.misses >= TIP_AFTER })
         return { text: view + news(g) + await hint(g) }
       }
     },
@@ -188,7 +193,7 @@ export function apply (ctx) {
         if (a === 'walk' && (!args.dir || args.dir === 'up')) throw new Error('walk needs dir left or right')
         const r = await g.order({ action: a, target: args.target, dir: args.dir, tiles: args.tiles }, exec?.signal)
         if (!r.ok && !r.aborted) g.miss()
-        const help = r.ok || r.aborted ? '' : ((a === 'go' || a === 'pull') && await way(g, args.target)) || await hint(g)
+        const help = r.ok || r.aborted ? '' : (a === 'go' && await way(g, args.target)) || await hint(g)
         return { text: `${r.ok ? '✓' : '✗'} ${r.text}\n${status(g)}${news(g)}${help}` }
       }
     },

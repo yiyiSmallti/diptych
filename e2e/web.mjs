@@ -76,8 +76,11 @@ function agentBrain () {
   const act = (input) => ({ name: 'diptych_act', input })
   const steps = [
     { call: { name: 'diptych_look', input: {} } },
-    // Three misses (the exit is out of reach at the start) earn a hint.
+    // The exit is out of reach at the start. Two misses bring the level's
+    // tip, four the solver's hint.
     { call: act({ action: 'go', target: 'exit' }) },
+    { call: act({ action: 'go', target: 'exit' }) },
+    { call: { name: 'diptych_look', input: {} } },
     { call: act({ action: 'go', target: 'exit' }) },
     { call: act({ action: 'go', target: 'exit' }) },
     { call: { name: 'diptych_look', input: {} } },
@@ -203,11 +206,16 @@ async function suite (s, cleanup) {
   const look = model.results.find((r) => r.text.includes('关卡 1「两条路」'))?.text ?? ''
   s.step('Agent 的 diptych_look 拿到带坐标的地图、对象说明和走得到的目标', check(look.includes(' 8 #') && look.includes('b 按钮 (18,5)') && look.includes('你是凇') && look.includes('你现在走得到'), look.slice(0, 200)))
   const fails = model.results.filter((r) => r.text.startsWith('✗ 到不了出口'))
-  const way = fails[0]?.text.slice(fails[0].text.indexOf('怎么才能到：')) ?? ''
-  s.step('走不到出口时，失败结果马上说明要先做什么才走得到（解关器按目标算）', check(/怎么才能到：要走到出口，得先：1\. (你|请同伴（烬）)/.test(way), fails[0]?.text.slice(0, 300) ?? '没有失败结果'), way.replace(/\n/g, ' ').slice(0, 160))
-  const hinted = model.results.find((r) => r.text.includes('关卡 1「两条路」') && r.text.includes('提示（'))?.text ?? ''
+  const f1 = fails[0]?.text ?? ''
+  const gemLine = f1.split('\n').find((l) => l.startsWith('你的宝石：')) ?? ''
+  s.step('开局的地图和头一次失手都不带提示，Agent 得自己想', check(look && !look.includes('关卡提示') && f1 && !f1.includes('提示') && !f1.includes('怎么才能到'), f1.slice(0, 300) || '没有失败结果'))
+  s.step('每次动作的状态都列出还没拿的宝石、在哪、现在走不走得到', check(/^你的宝石：0\/2，还没拿：r1 在.+，现在(走得到|还走不到)/.test(gemLine) && look.includes('去出口前都拿上'), gemLine || f1.slice(0, 300)), gemLine)
+  const looks = model.results.filter((r) => r.text.includes('关卡 1「两条路」'))
+  const tipped = looks.find((r) => r.text.includes('关卡提示：'))?.text ?? ''
+  s.step('失手 2 次后，diptych_look 才带上关卡自己的提示，还没有解关器的走法', check(tipped && !tipped.includes('提示（'), tipped.slice(tipped.indexOf('关卡提示')).slice(0, 160) || '没看到关卡提示'))
+  const hinted = looks.find((r) => r.text.includes('提示（'))?.text ?? ''
   const tip = hinted.slice(hinted.indexOf('提示（'))
-  s.step('Agent 连着失手 3 次后，diptych_look 带上解关器算出的过关走法', check(fails.length >= 3 && /1\. (你|请同伴（烬）)/.test(tip), tip.replace(/\n/g, ' ').slice(0, 160) || `失手 ${fails.length} 次，没看到提示`))
+  s.step('失手 4 次后，diptych_look 再带上解关器算出的过关走法', check(fails.length >= 4 && /失手 4 次/.test(tip) && /1\. (你|请同伴（烬）)/.test(tip), tip.replace(/\n/g, ' ').slice(0, 160) || `失手 ${fails.length} 次，没看到提示`))
   s.step('Agent 用 diptych_act 让凇自己走上中间层 (15,5)，说的话出现在游戏聊天里', err)
   await p.shot('web-agent-moved.png')
 

@@ -855,6 +855,18 @@ export function snapshot (W) {
 
 const cellOfSnap = (h) => ({ x: Math.floor(h.x + P.w / 2), y: Math.floor(h.y + P.h - EPS) })
 
+// gemsLine says how many of `kind`'s gems are taken and where the rest
+// are, and, given `reach` (what that hero can get to now), which of them
+// it can walk to right away; '' when the level has none for it.
+export function gemsLine (L, taken, kind, reach, cells = false) {
+  const gems = L.gems.filter((g) => g.kind === kind)
+  if (!gems.length) return ''
+  const left = gems.filter((g) => !taken.has(g.id))
+  if (!left.length) return `你的宝石：${gems.length}/${gems.length}，都拿到了`
+  const say = (g) => `${g.id}${cells ? ` (${g.x},${g.y})` : ''} 在${where(L, g.x, g.y)}${reach ? (reach.includes(g.id) ? '，现在走得到' : '，现在还走不到') : ''}`
+  return `你的宝石：${gems.length - left.length}/${gems.length}，还没拿：${left.map(say).join('；')}（去出口前都拿上）`
+}
+
 // textView draws the level for the Agent playing `me`: a character grid
 // with row and column numbers, then the objects and what they do.
 export function textView (L, s, me, extra = {}) {
@@ -928,13 +940,10 @@ export function textView (L, s, me, extra = {}) {
     out.push('对象（字母和坐标只给你自己导航用；跟同伴说话时用颜色和位置称呼它们，比如「黄色按钮」「左边的升降台」「紫灯的门」）：')
     for (const o of objs) out.push('- ' + o)
   }
-  const gems = L.gems.filter((g) => g.kind === youK)
-  if (gems.length) {
-    const left = gems.filter((g) => !taken.has(g.id))
-    out.push(`你的宝石：${gems.length - left.length}/${gems.length}${left.length ? '，还剩 ' + left.map((g) => `${g.id}(${g.x},${g.y})`).join(' ') : ''}（可选，拿不拿都能过关）`)
-  }
+  const gl = gemsLine(L, taken, youK, extra.reach, true)
+  if (gl) out.push(gl)
   if (extra.reach) out.push(`你现在走得到：${extra.reach.length ? extra.reach.join(' ') : '（附近没有可去的对象）'}`)
-  if (L.tip) out.push(`提示：${L.tip}`)
+  if (extra.tip && L.tip) out.push(`关卡提示：${L.tip}`)
   return out.join('\n')
 }
 
