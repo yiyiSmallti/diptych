@@ -339,4 +339,29 @@ async function suite (s, cleanup) {
     await p.shot('web-menu-chapter5.png')
   })
   s.step('全部 30 关都能在页面里开局和绘制；选关卡片放得下第五章', err)
+
+  // The level fills the Sidebar: in the default width it spans the width
+  // with the input still on screen; made fullscreen, it grows and still
+  // leaves the chat and input visible.
+  let sizes = null
+  err = await attempt(async () => {
+    await game(`g.start('1'); return true`)
+    await sleep(600)
+    const measure = `const c = document.querySelector('.dp-canvas').getBoundingClientRect(); const i = document.querySelector('.dp-in').getBoundingClientRect(); const st = document.querySelector('.dp-stage').getBoundingClientRect(); return { w: Math.round(c.width), h: Math.round(c.height), stage: Math.round(st.width), input: i.bottom <= innerHeight + 1 && i.height > 0 }`
+    const before = await p.js(measure)
+    if (!before.input) throw new Error('默认宽度下输入框跑出了画面：' + JSON.stringify(before))
+    if (before.w < before.stage - 40) throw new Error('默认宽度下画面没有占满侧边栏宽度：' + JSON.stringify(before))
+    const full = await p.js(`const b = [...document.querySelectorAll('button')].find((x) => /全屏/.test(x.getAttribute('aria-label') ?? x.title ?? '') && !/退出/.test(x.getAttribute('aria-label') ?? '')); return b ? __q.centre(b) : null`)
+    if (!full) throw new Error('找不到侧边栏的全屏按钮')
+    await p.click(pt(full).x, pt(full).y, 1)
+    await sleep(1200)
+    const after = await p.js(measure)
+    sizes = { before, after }
+    if (!(after.h > before.h * 1.2)) throw new Error('全屏后画面没有变大：' + JSON.stringify(sizes))
+    if (!after.input) throw new Error('全屏后输入框跑出了画面：' + JSON.stringify(after))
+    await p.shot('web-fullscreen.png')
+    const exit = await p.js(`const b = [...document.querySelectorAll('button')].find((x) => /退出全屏/.test(x.getAttribute('aria-label') ?? x.title ?? '')); return b ? __q.centre(b) : null`)
+    if (exit) await p.click(pt(exit).x, pt(exit).y, 1)
+  })
+  s.step('游戏铺满侧边栏：默认宽度下画面占满宽度、输入框在屏内；侧边栏全屏后画面跟着变大，输入框仍在屏内', err, sizes ? `画面 ${sizes.before.w}×${sizes.before.h} → 全屏 ${sizes.after.w}×${sizes.after.h}` : '')
 }

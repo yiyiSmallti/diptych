@@ -100,6 +100,7 @@ window.__ModuleLoader__.load({
       return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`
     }
     const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
+    const CHAT_MIN = 88 // px of chat log kept visible below the level
     const KEEP_MS = 8000 // how long a new level waits for the Agent before calling it back
 
     const glowCache = new Map()
@@ -336,7 +337,7 @@ window.__ModuleLoader__.load({
         const btn = (label, title, fn) => el('button', { type: 'button', class: 'dp-btn', title, onclick: fn }, label)
         this.restartBtn = btn('重开', '重新开始这一关 (R)', () => this.restart(true))
         this.menuBtn = btn('选关', '回到选关', () => this.toMenu())
-        const top = el('div', { class: 'dp-top' }, this.titleEl, this.clockEl, this.gemsEl, el('span', { class: 'dp-sp' }), this.restartBtn, this.menuBtn)
+        const top = this.top = el('div', { class: 'dp-top' }, this.titleEl, this.clockEl, this.gemsEl, el('span', { class: 'dp-sp' }), this.restartBtn, this.menuBtn)
         this.agentChip = el('div', { class: 'dp-agent' })
         this.log = el('div', { class: 'dp-log', role: 'log', 'aria-live': 'polite' })
         this.input = el('input', { class: 'dp-in', placeholder: '跟同伴说点什么，回车发送', maxlength: '200' })
@@ -358,6 +359,7 @@ window.__ModuleLoader__.load({
         this.canvas.addEventListener('contextmenu', (e) => { e.preventDefault(); this.ping(e) })
         this.ro = new ResizeObserver(() => this.resize())
         this.ro.observe(this.stage)
+        this.ro.observe(this.root)
         this.updateChrome()
       }
 
@@ -376,7 +378,12 @@ window.__ModuleLoader__.load({
         const L = this.L ?? { w: 28, h: 12 }
         const box = this.stage.getBoundingClientRect()
         const avail = Math.max(200, box.width - 2)
-        const T = Math.max(10, Math.min(40, Math.floor(avail / L.w)))
+        // The level fills the Sidebar as far as its width and height allow,
+        // keeping room below for the status, a few lines of chat and the
+        // input; it grows when the Sidebar is dragged wider or fullscreen.
+        const below = [this.top, this.agentChip, this.quick, this.input, this.help].reduce((n, e) => n + (e?.offsetHeight ?? 0), 0)
+        const tall = this.root.clientHeight - below - CHAT_MIN - 60
+        const T = Math.max(10, Math.min(56, Math.floor(avail / L.w), tall > 0 ? Math.floor(tall / L.h) : 56))
         this.T = T
         const dpr = window.devicePixelRatio || 1
         this.canvas.width = Math.round(L.w * T * dpr)
@@ -1560,8 +1567,8 @@ window.__ModuleLoader__.load({
 @keyframes dp-pulse{50%{box-shadow:0 0 0 6px rgba(63,185,80,0)}}
 .dp-invite{flex:none;height:26px;padding:0 12px;border:0;border-radius:7px;background:#4f6bff;color:#fff;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
 .dp-invite:hover{background:#3d58ea}
-.dp-chat{display:flex;flex-direction:column;gap:6px}
-.dp-log{max-height:132px;min-height:44px;overflow-y:auto;padding:6px 8px;border:1px solid var(--dsw-alias-border-l2,#e3e5e8);border-radius:9px;font-size:12.5px;scrollbar-width:thin}
+.dp-chat{display:flex;flex-direction:column;gap:6px;flex:1;min-height:0}
+.dp-log{flex:1;min-height:88px;overflow-y:auto;padding:6px 8px;border:1px solid var(--dsw-alias-border-l2,#e3e5e8);border-radius:9px;font-size:12.5px;scrollbar-width:thin}
 .dp-l{padding:1px 0;word-break:break-word}
 .dp-l b{font-weight:600}
 .dp-l.a b{color:#2f7fd6}.dp-l.m b{color:#d0622a}
