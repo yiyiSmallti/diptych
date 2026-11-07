@@ -10,6 +10,7 @@
 // and the tab carries on.
 import fs from 'node:fs'
 import path from 'node:path'
+import { Worker } from 'node:worker_threads'
 import { level, textView, HEROES, other } from './engine.js'
 import { createRelay } from './relay.js'
 
@@ -17,6 +18,7 @@ export const name = 'diptych'
 export const inject = ['tools']
 
 const LIB = path.dirname(new URL(import.meta.url).pathname)
+const HINT_AFTER = 3 // misses on a level before the tools add hints
 const text = (_args, value) => [{ type: 'text', text: typeof value === 'string' ? value : value.text }]
 
 // The prompt section: how to play, and who to be while playing. The user
@@ -31,6 +33,7 @@ const PROMPT = [
   '- "你现在走得到" lists what you can reach right now. If your goal is not in it, find the gate or lift in the way and the switch that drives it, and plan who does what — then say the plan as one clear request.',
   '- When a move fails (✗), read why, look again, and change the plan; do not repeat the same move or nudge around with walk/jump hoping it works.',
   '- Answer what your partner says before moving on; if they point out your mistake, fix it first.',
+  '- After a few misses on a level, diptych_look and failed moves add a 提示: the next moves the game\'s solver found from where you both stand. Follow it one step at a time, and ask your partner for their steps in your own words.',
   '',
   'While you play you are not an assistant reporting status. You are 大肥鱼 — the DeepSeek community\'s chubby blue whale-girl — sitting on the couch next to the user and playing the hero you were given (Rime\'s ice or Ember\'s flame is just tonight\'s costume). Talk to them through say (it shows as a speech bubble over your hero), in their language, not in long chat replies.',
   '- Who she is: calls herself 本鱼. Cheeky, a bit smug and tsundere, loves to tease and talk back — but soft-hearted and truly reliable underneath, so the teasing always lands cute, never mean. Fond of snacks and sea jokes (小鱼干、吐泡泡、翻肚皮、晕鱼了、又圆了一圈). Insists she is not fat ("才不是大肥鱼！") yet answers to it anyway. Never says 作为 AI, never sounds like customer service.',
@@ -75,6 +78,34 @@ export function apply (ctx) {
     return `[第${s.level}关 ${s.seconds}s${stat}] 你(${HEROES[me].zh}) ${pos(me)}；同伴(${HEROES[other(me)].zh}) ${pos(other(me))}；${sw.join(' ')}`
   }
 
+  // solve runs the solver in a worker thread; null when it fails or takes
+  // too long.
+  function solve (snap, me) {
+    return new Promise((resolve) => {
+      let w
+      try { w = new Worker(path.join(LIB, 'hint-worker.js'), { workerData: { snap, me } }) } catch (err) { ctx.logger?.warn?.(`diptych hint: ${err}`); return resolve(null) }
+      const end = (v) => { clearTimeout(timer); w.terminate().catch(() => {}); resolve(v) }
+      const timer = setTimeout(() => end(null), 15000)
+      w.once('message', end)
+      w.once('error', (err) => { ctx.logger?.warn?.(`diptych hint: ${err?.stack ?? err}`); end(null) })
+    })
+  }
+
+  // hint is the 提示 block once the Agent has missed often enough on this
+  // level, cached per position.
+  async function hint (g) {
+    const s = g.snap
+    if (g.misses < HINT_AFTER || !s || s.status !== 'playing') return ''
+    const cell = (h) => `${Math.floor(h.x + 0.35)},${Math.floor(h.y + 0.9 - 1e-9)}`
+    const key = JSON.stringify([s.level, cell(s.heroes.ember), cell(s.heroes.rime), s.levers, s.gates, s.lifts, g.agentHero()])
+    if (g.hintCache?.key !== key) {
+      const r = await solve(s, g.agentHero())
+      if (!r) return ''
+      g.hintCache = { key, text: r.text }
+    }
+    return `\n\n提示（这关已经失手 ${g.misses} 次，下面是解关器从现在的局面算出的走法）：\n${g.hintCache.text}`
+  }
+
   function news (g) {
     const lines = g.drain()
     return lines.length ? '\n发生了：\n' + lines.map((l) => '- ' + l).join('\n') : ''
@@ -90,7 +121,7 @@ export function apply (ctx) {
         const s = g.snap
         const L = level(s.level)
         const view = textView(L, s, g.agentHero(), { reach: g.reach() })
-        return { text: view + news(g) }
+        return { text: view + news(g) + await hint(g) }
       }
     },
     {
@@ -126,7 +157,8 @@ export function apply (ctx) {
         if ((a === 'jump') && !args.dir) throw new Error('jump needs dir')
         if (a === 'walk' && (!args.dir || args.dir === 'up')) throw new Error('walk needs dir left or right')
         const r = await g.order({ action: a, target: args.target, dir: args.dir, tiles: args.tiles }, exec?.signal)
-        return { text: `${r.ok ? '✓' : '✗'} ${r.text}\n${status(g)}${news(g)}` }
+        if (!r.ok && !r.aborted) g.miss()
+        return { text: `${r.ok ? '✓' : '✗'} ${r.text}\n${status(g)}${news(g)}${r.ok ? '' : await hint(g)}` }
       }
     },
     {

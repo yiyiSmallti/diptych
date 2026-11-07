@@ -76,6 +76,11 @@ function agentBrain () {
   const act = (input) => ({ name: 'diptych_act', input })
   const steps = [
     { call: { name: 'diptych_look', input: {} } },
+    // Three misses (the exit is out of reach at the start) earn a hint.
+    { call: act({ action: 'go', target: 'exit' }) },
+    { call: act({ action: 'go', target: 'exit' }) },
+    { call: act({ action: 'go', target: 'exit' }) },
+    { call: { name: 'diptych_look', input: {} } },
     { call: act({ action: 'go', target: '15,5', say: '我先爬上中间层～你去踩黄灯那个 b？' }) },
     { call: { name: 'diptych_wait', input: { seconds: 30 } }, until: (t) => t.includes('闸门 A 开了') || /A开/.test(t) },
     { call: act({ action: 'pull', target: 'l', say: '谢啦！门开了，我去拉拉杆～' }) },
@@ -196,6 +201,10 @@ async function suite (s, cleanup) {
   })
   const look = model.results.find((r) => r.text.includes('关卡 1「两条路」'))?.text ?? ''
   s.step('Agent 的 diptych_look 拿到带坐标的地图、对象说明和走得到的目标', check(look.includes(' 8 #') && look.includes('b 按钮 (18,5)') && look.includes('你是凇') && look.includes('你现在走得到'), look.slice(0, 200)))
+  const fails = model.results.filter((r) => r.text.startsWith('✗ 到不了出口'))
+  const hinted = model.results.find((r) => r.text.includes('关卡 1「两条路」') && r.text.includes('提示（'))?.text ?? ''
+  const tip = hinted.slice(hinted.indexOf('提示（'))
+  s.step('Agent 连着失手 3 次后，diptych_look 带上解关器算出的下一步提示', check(fails.length >= 3 && !fails[0].text.includes('提示（') && fails[2].text.includes('提示（') && /1\. (你|请同伴（烬）)/.test(tip), tip.replace(/\n/g, ' ').slice(0, 160) || `失手 ${fails.length} 次，没看到提示`))
   s.step('Agent 用 diptych_act 让凇自己走上中间层 (15,5)，说的话出现在游戏聊天里', err)
   await p.shot('web-agent-moved.png')
 

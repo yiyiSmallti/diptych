@@ -37,7 +37,13 @@ class Game {
     this.inbox = []
     this.waiters = new Set()
     this.activeUntil = 0
+    // Misses: the Agent's failed moves and its hero's deaths on this
+    // level. Past HINT_AFTER the tools add the solver's next moves.
+    this.misses = 0
+    this.hintCache = null
   }
+
+  miss () { this.misses++ }
 
   open () { return !!this.snap && Date.now() - this.lastSync < OPEN_MS }
   agentHero () { return this.agent === 'ember' || this.agent === 'rime' ? this.agent : null }
@@ -65,10 +71,10 @@ class Game {
       }
       const abort = () => {
         this.commands.push({ id: ++this.next, action: 'stop' })
-        done({ ok: false, text: '这一轮被取消了，停下了' })
+        done({ ok: false, aborted: true, text: '这一轮被取消了，停下了' })
       }
       const timer = setInterval(() => {
-        if (!this.open()) done({ ok: false, text: '游戏页面关掉了' })
+        if (!this.open()) done({ ok: false, aborted: true, text: '游戏页面关掉了' })
         else if (Date.now() - started > ORDER_MS) done({ ok: false, text: '一分钟还没做完，先停在这里' })
         else this.touch()
       }, 500)
@@ -123,9 +129,12 @@ class Game {
       case 'lift': return [`升降台 ${ev.id} ${ev.up ? '升到顶' : '降到底'}了`, false]
       case 'gem': return [`${who(ev.by)}拿到宝石 ${ev.id}`, false]
       case 'exit': return ev.at ? [`${who(ev.who)}站到出口了`, ev.who !== me] : null
-      case 'died': return [`${who(ev.who)}${ev.liquid ? `碰到${LIQUID_ZH[ev.liquid]}` : '掉下去'}倒下了，关卡重开`, true]
+      case 'died':
+        if (ev.who === me) this.miss()
+        return [`${who(ev.who)}${ev.liquid ? `碰到${LIQUID_ZH[ev.liquid]}` : '掉下去'}倒下了，关卡重开`, true]
       case 'complete': return [`过关！用时 ${ev.seconds}s，宝石 ${ev.gems}/${ev.of}`, true]
       case 'level': {
+        if (!ev.restart) { this.misses = 0; this.hintCache = null }
         const L = level(ev.id)
         return [`${ev.restart ? '重新开始' : '开始'}第 ${ev.id} 关「${L?.name ?? ''}」，你是${HEROES[me]?.zh ?? '?'}`, true]
       }
@@ -139,7 +148,7 @@ class Game {
     const now = Date.now()
     if (body.run && body.run !== this.run) {
       // A new tab (or a reload): orders the old one had are lost.
-      if (this.run) for (const done of [...this.pending.values()]) done({ ok: false, text: '游戏页面重新加载了' })
+      if (this.run) for (const done of [...this.pending.values()]) done({ ok: false, aborted: true, text: '游戏页面重新加载了' })
       this.run = body.run
       this.commands = []
     }
