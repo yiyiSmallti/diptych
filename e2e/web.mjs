@@ -315,7 +315,7 @@ async function suite (s, cleanup) {
     await sleep(1300)
     saved = await game(`return { x: g.W.heroes.ember.x, tick: g.W.tick }`)
     await p.js(`document.dispatchEvent(new Event('visibilitychange')); return true`)
-    const run = await p.js(`return JSON.parse(localStorage.getItem('diptych:v1')).run`)
+    const run = await p.js(`return JSON.parse(localStorage.getItem('diptych:v1:run:' + __q.game().sessionId))`)
     if (run?.level !== '2' || Math.abs(run.world.heroes.ember.x - saved.x) > 0.01) throw new Error('存档里没有第 2 关的位置：' + JSON.stringify(run)?.slice(0, 200))
     await c.navigate(url).catch(() => {})
     await c.waitLoaded()
@@ -334,6 +334,25 @@ async function suite (s, cleanup) {
     await p.waitJS(`return __q.log().some((l) => l.includes('继续第 2 关'))`, 3000)
   })
   s.step('本地存档：第 2 关走了几步后刷新页面，游戏自己回到第 2 关、烬还站在原处', err, saved ? `存档时烬 x=${saved.x.toFixed(2)}，第 ${saved.tick} 帧` : '')
+
+  // The level in progress belongs to its conversation: a game opened for
+  // another Session in this browser (built off screen with the page's own
+  // game class) starts at the menu, and playing there leaves this
+  // conversation's level 2 alone. Unlocked levels are shared.
+  err = await attempt(async () => {
+    const other = 'e2e-other-conversation'
+    await p.js(`const box = document.createElement('div'); box.id = 'dp-other'; box.style.cssText = 'position:fixed;left:-3000px;top:0;width:600px;height:500px'; document.body.append(box); window.__other = new (__q.game().constructor)(box, ${jsStr(other)}); return true`)
+    await p.waitJS(`return window.__other.mode !== 'loading'`, 8000)
+    const o = await p.js(`const o = window.__other; return { mode: o.mode, unlocked: o.unlocked, cont: [...o.root.querySelectorAll('button')].some((b) => /继续第/.test(b.textContent)) }`)
+    if (o.mode !== 'menu' || o.cont) throw new Error('另一个对话接着玩了这个对话的那一局：' + JSON.stringify(o))
+    if (o.unlocked < 2) throw new Error('解锁进度没有共用：' + o.unlocked)
+    await p.js(`const o = window.__other; o.start('1'); for (let i = 0; i < 30; i++) o.tick(); o.saveRun(); return true`)
+    const runs = await p.js(`const get = (sid) => JSON.parse(localStorage.getItem('diptych:v1:run:' + sid)); return { mine: get(__q.game().sessionId), other: get(${jsStr(other)}) }`)
+    if (runs.other?.level !== '1') throw new Error('另一个对话的那一局没存下：' + JSON.stringify(runs.other)?.slice(0, 120))
+    if (runs.mine?.level !== '2' || Math.abs(runs.mine.world.heroes.ember.x - saved.x) > 0.05) throw new Error('这个对话的第 2 关被覆盖了：' + JSON.stringify(runs.mine)?.slice(0, 160))
+  })
+  await p.js(`window.__other?.dispose(); document.getElementById('dp-other')?.remove(); localStorage.removeItem('diptych:v1:run:e2e-other-conversation'); return true`).catch(() => {})
+  s.step('正在玩的那一局按对话分开存：另一个对话打开游戏从选关开始（解锁进度共用），在那边玩不会覆盖这边的第 2 关', err)
 
   // After a win the next level starts by itself; "stay" keeps the level.
   const toExits = `for (const k of ['ember', 'rime']) { const e = g.L.exits[k]; Object.assign(g.W.heroes[k], { x: e.x + 0.15, y: e.y + 0.1, vx: 0, vy: 0 }) } return true`

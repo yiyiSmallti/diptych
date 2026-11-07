@@ -56,6 +56,30 @@ window.__ModuleLoader__.load({
     }
     const load = () => { try { return JSON.parse(localStorage.getItem(STORE) ?? '{}') ?? {} } catch { return {} } }
     const save = (patch) => { try { localStorage.setItem(STORE, JSON.stringify({ ...load(), ...patch })) } catch {} }
+    // The level being played is kept per Session, so games in different
+    // conversations do not resume or overwrite each other's level. Unlocked
+    // levels and best results stay shared by the whole browser.
+    const runKey = (sid) => `${STORE}:run:${sid}`
+    const loadRun = (sid) => {
+      try {
+        const own = JSON.parse(localStorage.getItem(runKey(sid)) ?? 'null')
+        if (own) return own
+        // The one level saved before runs were kept per Session goes to
+        // the first conversation that opens the game.
+        const old = load().run
+        if (old) { localStorage.setItem(runKey(sid), JSON.stringify(old)); save({ run: undefined }) }
+        return old ?? null
+      } catch { return null }
+    }
+    const saveRunOf = (sid, run) => { try { if (run) localStorage.setItem(runKey(sid), JSON.stringify(run)); else localStorage.removeItem(runKey(sid)) } catch {} }
+    // shared merges this game's unlocked levels and best results with what
+    // games in other conversations saved meanwhile.
+    const better = (a, b) => !a || (b && (b.gems > a.gems || (b.gems === a.gems && b.seconds < a.seconds))) ? b : a
+    function shared (g) {
+      const st = load()
+      g.unlocked = Math.max(g.unlocked, st.unlocked ?? 1)
+      for (const [id, rec] of Object.entries(st.best ?? {})) g.best[id] = better(g.best[id], rec)
+    }
     const rand = () => Math.random().toString(36).slice(2, 10)
 
     async function sync (body) {
@@ -304,7 +328,7 @@ window.__ModuleLoader__.load({
           this.E = E
           this.mode = 'menu'
           // A level left half way is picked up where it was.
-          if (!this.resume(load().run)) this.renderMenu()
+          if (!this.resume(loadRun(this.sessionId))) this.renderMenu()
           this.loop()
         }, (err) => {
           this.overlay(el('div', { class: 'dp-card' }, el('h3', {}, '游戏没能加载'), el('p', {}, String(err?.message ?? err))))
@@ -447,6 +471,7 @@ window.__ModuleLoader__.load({
       renderMenu () {
         this.mode = 'menu'
         this.W = null
+        shared(this)
         const E = this.E
         if (Number(this.levelId) > this.unlocked || !E.level(this.levelId)) this.levelId = String(Math.min(this.unlocked, E.LEVELS.length))
         this.L = E.level(this.levelId)
@@ -487,7 +512,7 @@ window.__ModuleLoader__.load({
         const seg = el('div', { class: 'dp-seg' },
           el('button', { type: 'button', class: this.duo ? 'on' : '', onclick: () => { this.duo = true; save({ duo: true }); this.renderMenu() } }, '和 Agent 一起'),
           el('button', { type: 'button', class: this.duo ? '' : 'on', onclick: () => { this.duo = false; save({ duo: false }); this.renderMenu() } }, '一个人练习'))
-        const run = load().run
+        const run = loadRun(this.sessionId)
         const runL = run && Number(run.level) <= this.unlocked ? E.level(run.level) : null
         const start = el('div', { class: 'dp-row' },
           runL ? el('button', { type: 'button', class: 'dp-go', onclick: () => this.resume(run) }, `继续第 ${runL.id} 关 · ${Math.floor((run.world?.tick ?? 0) * E.TICK)} 秒`) : '',
@@ -552,11 +577,9 @@ window.__ModuleLoader__.load({
       saveRun () {
         const W = this.W
         if (!W || this.mode !== 'play' || W.status !== 'playing') return
-        save({
-          run: {
-            level: this.levelId, human: this.human, duo: this.duo, at: Date.now(),
-            world: { tick: W.tick, heroes: { ember: { ...W.heroes.ember }, rime: { ...W.heroes.rime } }, taken: [...W.taken], levers: { ...W.levers }, gates: { ...W.gates }, lifts: { ...W.lifts } }
-          }
+        saveRunOf(this.sessionId, {
+          level: this.levelId, human: this.human, duo: this.duo, at: Date.now(),
+          world: { tick: W.tick, heroes: { ember: { ...W.heroes.ember }, rime: { ...W.heroes.rime } }, taken: [...W.taken], levers: { ...W.levers }, gates: { ...W.gates }, lifts: { ...W.lifts } }
         })
       }
 
@@ -928,7 +951,9 @@ window.__ModuleLoader__.load({
         const next = E.LEVELS[i + 1]
         // The finished level is no longer something to resume; the menu
         // offers the next one.
-        save({ unlocked: this.unlocked, best: this.best, run: null, level: next ? next.id : this.levelId })
+        shared(this)
+        save({ unlocked: this.unlocked, best: this.best, level: next ? next.id : this.levelId })
+        saveRunOf(this.sessionId, null)
         this.addLog('s', `过关！${seconds} 秒，宝石 ${rec.gems}/${rec.of}`)
         this.wonTo = next?.id ?? null
         this.countEl = el('p', { class: 'dp-count' })
