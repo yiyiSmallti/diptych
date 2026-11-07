@@ -31,7 +31,9 @@
         "keywords": ["game", "co-op", "platformer", "puzzle", "游戏", "双人", "解谜", "冰火"],
         "labels": ["web", "agent-tools"]
       },
-      "versions": []
+      "versions": [
+        { "version": "0.1.0", "publishTimestamp": 1794054263, "source": { "type": "npm" }, "engines": { "dsh": ">=0.2.1-rc.5 <0.3.0" } }
+      ]
     }
   ]
 }
