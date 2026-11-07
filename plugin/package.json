@@ -1,6 +1,6 @@
 {
   "name": "@precinct/diptych",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "双联画：dsh web 右侧栏里的火与冰双人解谜平台游戏，你和 Agent 各控一个角色一起过关",
   "keywords": [
     "dsh",

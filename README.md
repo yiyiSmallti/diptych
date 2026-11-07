@@ -9,7 +9,7 @@ dsh web 右侧栏里的双人解谜平台游戏：一个是火（烬），一个
 
 Diptych（双联画）：两块画板合起来才是一幅画。
 
-![dsh web 里的双联画：左边是对话，右边烬踩着按钮，Agent 控的凇刚拉开拉杆，说「好耶，B 开啦！出口见 ✨」](docs/images/overview.jpg)
+![dsh web 里的双联画：左边是对话和 Agent 的工具调用，右边游戏铺满侧边栏；你控的烬踩住黄色按钮，Agent 控的凇拉开绿色拉杆，说「好耶，绿灯门开啦！出口见 ✨」](docs/images/overview.jpg)
 
 ![第 30 关「双联画」：一左一右两扇彩窗的大教堂里，三层楼的闸门、浮桥、升降台和两头的拉杆，每个开关和它管的机关亮同一种颜色的灯](docs/images/level30.jpg)
 
@@ -38,7 +38,7 @@ dsh plugin --profile web add "git+https://github.com/yiyiSmallti/diptych.git#mai
 ```
 
 ```bash
-dsh plugin --profile web add plugin/precinct-diptych-0.1.0.tgz
+dsh plugin --profile web add plugin/precinct-diptych-0.1.1.tgz
 ```
 
 ## 怎么玩
