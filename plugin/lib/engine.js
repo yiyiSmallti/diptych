@@ -386,7 +386,7 @@ export function step (W, inputs) {
     }
     for (const g of L.gems) {
       if (g.kind !== k || W.taken.has(g.id)) continue
-      if (overlap(rectOf(hero), { x: g.x + 0.15, y: g.y + 0.15, w: 0.7, h: 0.7 })) {
+      if (overlap(rectOf(hero), gemBox(g.x, g.y))) {
         W.taken.add(g.id)
         W.events.push({ type: 'gem', id: g.id, by: k })
       }
@@ -456,6 +456,11 @@ function programs (W, kind, x, y) {
   return out
 }
 
+// gemBox is the part of a cell a hero must overlap to pick up the gem
+// there. Jumps count a cell as touched by the same box, so a route the
+// autopilot plans through a gem really takes it.
+function gemBox (x, y) { return { x: x + 0.15, y: y + 0.15, w: 0.7, h: 0.7 } }
+
 const progInput = (prog, f) => ({ x: f < prog.hold ? prog.dir : 0, jump: prog.jump && f < 18 })
 
 // simulate runs a program from a node's centre on a frozen world and says
@@ -470,7 +475,7 @@ function simulate (F, kind, x, y, prog) {
     if (hero.y > F.L.h + 1) return null
     const r = rectOf(hero)
     for (let ty = Math.floor(r.y + EPS); ty <= Math.floor(r.y + r.h - EPS); ty++) {
-      for (let tx = Math.floor(r.x + EPS); tx <= Math.floor(r.x + r.w - EPS); tx++) touched.add(tx + ',' + ty)
+      for (let tx = Math.floor(r.x + EPS); tx <= Math.floor(r.x + r.w - EPS); tx++) if (overlap(r, gemBox(tx, ty))) touched.add(tx + ',' + ty)
     }
     if (f > 0 && hero.ground) {
       const at = landing(F, kind, hero)
@@ -746,6 +751,8 @@ export class Pilot {
     }
     t.steps = p.steps
     t.label = p.label
+    // A gem target is reached only once a gem there is taken.
+    t.gems = p.target.cells.filter((c) => c.touch).map((c) => W.L.gems.find((g) => g.x === c.x && g.y === c.y)?.id).filter(Boolean)
     t.i = 0
     t.f = 0
     t.stuck = 0
@@ -771,6 +778,10 @@ export class Pilot {
         t.use = false
         t.pulled = true
         return { x: 0, jump: false, use: true }
+      }
+      if (t.gems?.length && !t.gems.some((id) => W.taken.has(id))) {
+        this.finish(false, `走完了去${t.label}的路线，但没碰到它，宝石还在原处`)
+        return null
       }
       this.finish(true, t.raw ? '完成' : `到了${t.label ?? ''}${t.pulled ? '，拉了一下' : ''}`)
       return null

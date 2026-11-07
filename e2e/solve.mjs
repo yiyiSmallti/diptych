@@ -6,7 +6,7 @@
 import { LEVELS, engine, solveLevel, describe, hint } from './solver.mjs'
 import { route } from '../plugin/lib/solver.js'
 
-const { TICK, createWorld, level, step, snapshot } = engine
+const { TICK, createWorld, level, step, snapshot, KINDS, Pilot } = engine
 
 export async function solve (rep) {
   const s = rep.section(`关卡：自动解关器打通全部 ${LEVELS.length} 关（Node，同一个引擎，两个自动驾驶）`)
@@ -47,4 +47,31 @@ export async function solve (rep) {
   for (let i = 0; i < 200; i++) step(G, {})
   const w = route(snapshot(G), 'rime', 'r2')
   s.step('走不到时说明缺什么：第 2 关凇想拿竖井里的宝石 r2，解关器说要先请同伴拉回绿色拉杆 v', w?.ok && /要走到宝石 r2，得先：1\. 请同伴（烬）去拉绿色拉杆 v/.test(w.text) ? null : new Error(w?.text ?? '没有结果'), w?.text)
+  // A real game: the autopilot said 「✓ 到了宝石 r1」 after a jump that
+  // only grazed the gem's cell, and the gem stayed. From each hero's start
+  // and a few tiles either side, every go to a gem that reports ✓ must
+  // really have taken it.
+  let oks = 0
+  const false_ = []
+  for (const def of LEVELS) {
+    const L = level(def.id)
+    for (const k of KINDS) {
+      for (const g of L.gems.filter((x) => x.kind === k)) {
+        for (const dx of [0, -2, -1, 1, 2, 3]) {
+          const V = createWorld(L)
+          V.heroes[k].x += dx
+          for (let i = 0; i < 30; i++) step(V, {})
+          if (V.status !== 'playing' || !V.heroes[k].ground) continue
+          const p = new Pilot(k)
+          let res = null
+          p.go(V, g.id, {}, (r) => { res = r })
+          for (let i = 0; i < 60 * 30 && !res && V.status === 'playing'; i++) step(V, { [k]: p.tick(V) })
+          if (!res?.ok) continue
+          oks++
+          if (!V.taken.has(g.id)) false_.push(`第 ${L.id} 关 ${g.id}（起点偏 ${dx}）`)
+        }
+      }
+    }
+  }
+  s.step('自动驾驶说「到了宝石」时宝石真的拿到了（30 关每颗宝石，从几个起点去拿）', oks > 100 && !false_.length ? null : new Error(false_.length ? `报到了却没拿到：${false_.slice(0, 6).join('、')}${false_.length > 6 ? ` 等 ${false_.length} 处` : ''}` : `只有 ${oks} 次成功`), `${oks} 次报到了，全都拿到`)
 }
