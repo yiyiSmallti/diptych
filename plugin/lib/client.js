@@ -265,6 +265,10 @@ window.__ModuleLoader__.load({
         this.host = host
         this.sessionId = sessionId
         this.run = rand()
+        // When the user last touched this page; with two pages open the
+        // Session follows the one touched last (see relay.js).
+        this.claim = Date.now()
+        this.standby = false
         this.E = null
         this.W = null
         this.L = null
@@ -350,6 +354,9 @@ window.__ModuleLoader__.load({
         this.help = el('div', { class: 'dp-help' })
         this.root = el('div', { class: 'dp', tabindex: '0' }, top, this.stage, this.agentChip, el('div', { class: 'dp-chat' }, this.log, this.quick, this.input), this.help)
         this.host.append(this.root)
+        const touch = () => { this.claim = Date.now() }
+        this.root.addEventListener('pointerdown', touch, true)
+        this.root.addEventListener('keydown', touch, true)
         this.root.addEventListener('keydown', (e) => this.key(e, true))
         this.root.addEventListener('keyup', (e) => this.key(e, false))
         this.root.addEventListener('focusin', () => this.updateHint())
@@ -402,7 +409,11 @@ window.__ModuleLoader__.load({
         this.menuBtn.hidden = this.mode === 'menu' || this.mode === 'loading'
         this.clockEl.hidden = this.gemsEl.hidden = !playing
         const ak = this.agentKind
-        if (!this.duo) {
+        if (this.standby && this.duo) {
+          this.agentChip.className = 'dp-agent'
+          const here = el('button', { type: 'button', class: 'dp-invite', onclick: () => { this.claim = Date.now(); this.syncNow() } }, '在这里玩')
+          this.agentChip.replaceChildren(el('span', {}, '这局在另一个页面里和 Agent 玩着'), here)
+        } else if (!this.duo) {
           this.agentChip.className = 'dp-agent off'
           this.agentChip.replaceChildren(el('span', {}, '单人练习：WASD 控制烬，方向键控制凇'))
         } else if (this.agent.active) {
@@ -637,7 +648,7 @@ window.__ModuleLoader__.load({
       // it again every level. A tool call or a wait since the level began
       // means it is still playing.
       keepAgent () {
-        if (!this.nudge) return
+        if (!this.nudge || this.standby) return
         if (this.mode !== 'play' || !this.duo) { this.nudge = false; return }
         const since = performance.now() - this.levelAt
         const a = this.agent
@@ -801,6 +812,7 @@ window.__ModuleLoader__.load({
         const body = {
           sessionId: this.sessionId,
           run: this.run,
+          claim: this.claim,
           agent: this.duo && this.mode === 'play' ? this.agentKind : null,
           snapshot: snap,
           reach: this.reach,
@@ -811,6 +823,12 @@ window.__ModuleLoader__.load({
           const r = await sync(body)
           if (!this.alive) return
           this.syncErr = ''
+          if (!!r.standby !== this.standby) {
+            this.standby = !!r.standby
+            this.addLog('s', this.standby ? '这局游戏在另一个页面里和 Agent 玩着；在这里按键或点一下，就换到这个页面玩' : '换到这个页面了，Agent 跟这里一起玩')
+            this.updateChrome()
+          }
+          if (this.standby) return
           const was = this.agent.active
           this.agent = r.agent ?? this.agent
           this.keepAgent()

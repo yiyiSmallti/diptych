@@ -224,6 +224,11 @@ async function suite (s, cleanup) {
   // Timed in the page: from the frame b goes down to the first frame
   // Rime moves.
   let woke = null
+  // Meanwhile an old game page on the same Session keeps syncing its own
+  // world, as a tab left open from earlier did in a real game (Ember back
+  // at the start, hours on the clock). Posted from this page with the
+  // client's own request, under another page id and an old last touch.
+  await p.js(`const g = __q.game(); const st = window.__stale = { n: 0, standby: 0, on: true }; const old = Date.now() - 3600e3; const snap = g.E.snapshot(g.E.createWorld(g.L)); const tick = async () => { if (!st.on) return; try { const r = await fetch('api/diptych/sync', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ sessionId: g.sessionId, run: 'stale-page', claim: old, agent: 'rime', snapshot: snap, reach: [], events: [], results: [] }) }).then((r) => r.json()); st.n++; if (r.standby) st.standby++ } catch {} setTimeout(tick, 100) }; tick(); return true`)
   err = await attempt(async () => {
     await p.js(`const g = __q.game(); window.__wake = {}; const f = () => { const w = window.__wake; const W = g.W; const now = performance.now(); if (w.b == null && W.buttons.b) { w.b = now; w.x = W.heroes.rime.x; w.y = W.heroes.rime.y } if (w.b != null && w.go == null && Math.hypot(W.heroes.rime.x - w.x, W.heroes.rime.y - w.y) > 0.05) w.go = now; if (w.go == null) requestAnimationFrame(f) }; requestAnimationFrame(f); return true`)
     const r = await p.js(`return __q.game().assist('b')`)
@@ -237,6 +242,21 @@ async function suite (s, cleanup) {
   const pressed = model.results.find((r) => /同伴（烬）踩下了.色按钮 b/.test(r.text))?.text ?? ''
   s.step('同伴踩下按钮就叫醒 diptych_wait：不用等到 30 秒超时，凇在 3 秒内动起来', check(pressed && !pressed.startsWith('（等到时间了') && woke > 0 && woke < 3000, `踩下 b 到凇起步 ${Math.round(woke)} ms`), `踩下 b 到凇起步 ${Math.round(woke)} ms`)
   await p.shot('web-coop.png')
+  const stale = await p.js(`window.__stale.on = false; return window.__stale`)
+  s.step('旧页面同时在同步自己那局：宿主只跟着正在玩的页面，Agent 的动作没被打断，旧页面被告知待命', check(stale?.n > 10 && stale.standby === stale.n && !model.results.some((r) => r.text.includes('换了页面')), JSON.stringify(stale)), `旧页面同步 ${stale?.n} 次，全部待命`)
+
+  // A page the user touches later takes over; this one stands by and
+  // offers 「在这里玩」, which takes it back.
+  err = await attempt(async () => {
+    const r = await p.js(`const g = __q.game(); return fetch('api/diptych/sync', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ sessionId: g.sessionId, run: 'newer-page', claim: Date.now(), agent: 'rime', snapshot: null, reach: [], events: [], results: [] }) }).then((r) => r.json())`)
+    if (r?.standby) throw new Error('刚点过的另一个页面没接手')
+    await p.waitJS(`return __q.game().standby === true`, 3000)
+    const b = await p.js(`const b = [...document.querySelectorAll('button')].find((x) => x.textContent === '在这里玩'); return b ? __q.centre(b) : null`)
+    if (!b) throw new Error('待命时没有「在这里玩」')
+    await p.click(pt(b).x, pt(b).y, 1)
+    await p.waitJS(`return __q.game().standby === false`, 3000)
+  })
+  s.step('用户在另一个页面动了，那边接手、这边待命并显示「在这里玩」；点它又换回这里', err)
 
   err = await attempt(async () => {
     const r = await p.js(`return __q.game().assist('exit')`)

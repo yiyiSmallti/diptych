@@ -10,6 +10,7 @@ const ACTIVE_MS = 25000 // after a tool call, the Agent counts as in the game
 const ORDER_MS = 60000
 const INBOX = 60
 const SETTLE_MS = 400 // a partner standing still this long after moving wakes a waiting Agent
+const OWNER_GONE_MS = 2000 // a page silent this long hands the Session to another one
 
 export function createRelay () {
   const games = new Map()
@@ -27,6 +28,8 @@ class Game {
   constructor (sid) {
     this.sid = sid
     this.lastSync = 0
+    // The page the Session follows, and when the user last touched it.
+    this.claim = 0
     this.snap = null
     this.run = null
     this.agent = null
@@ -199,12 +202,20 @@ class Game {
 
   sync (body) {
     const now = Date.now()
+    const claim = Number.isFinite(body.claim) ? body.claim : 0
     if (body.run && body.run !== this.run) {
-      // A new tab (or a reload): orders the old one had are lost.
-      if (this.run) for (const done of [...this.pending.values()]) done({ ok: false, aborted: true, text: '游戏页面重新加载了' })
+      // Two pages can sync to one Session (an old tab left open, each with
+      // its own world). The Session follows one: the page the user touched
+      // or opened last, or any page once the one it followed goes quiet.
+      // The other stands by; switching back and forth would abort every
+      // move the Agent makes.
+      if (this.run && now - this.lastSync < OWNER_GONE_MS && claim <= this.claim) return { standby: true }
+      // A reload or another page took over: orders the old one had are lost.
+      if (this.run) for (const done of [...this.pending.values()]) done({ ok: false, aborted: true, text: '游戏换了页面（刷新了，或者换到另一个窗口在玩），动作没做完，look 一下再继续' })
       this.run = body.run
       this.commands = []
     }
+    this.claim = Math.max(this.claim, claim)
     this.lastSync = now
     if (body.snapshot && typeof body.snapshot === 'object') this.snap = body.snapshot
     this.agent = body.agent ?? null
