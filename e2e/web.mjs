@@ -86,7 +86,8 @@ function agentBrain () {
     { call: act({ action: 'pull', target: 'l', say: '谢啦！门开了，我去拉拉杆～' }) },
     { call: act({ action: 'go', target: 'exit', say: '好耶，B 开啦！出口见 ✨' }) },
     { call: { name: 'diptych_wait', input: { seconds: 30 } }, until: (t) => t.includes('过关') },
-    { call: act({ action: 'next', say: '配合满分！下一关走起～' }) },
+    // Ends its turn after the win; the game calls it back for level 2.
+    { call: null },
     { call: { name: 'diptych_look', input: {} } }
   ]
   let i = -1
@@ -202,22 +203,31 @@ async function suite (s, cleanup) {
   const look = model.results.find((r) => r.text.includes('关卡 1「两条路」'))?.text ?? ''
   s.step('Agent 的 diptych_look 拿到带坐标的地图、对象说明和走得到的目标', check(look.includes(' 8 #') && look.includes('b 按钮 (18,5)') && look.includes('你是凇') && look.includes('你现在走得到'), look.slice(0, 200)))
   const fails = model.results.filter((r) => r.text.startsWith('✗ 到不了出口'))
+  const way = fails[0]?.text.slice(fails[0].text.indexOf('怎么才能到：')) ?? ''
+  s.step('走不到出口时，失败结果马上说明要先做什么才走得到（解关器按目标算）', check(/怎么才能到：要走到出口，得先：1\. (你|请同伴（烬）)/.test(way), fails[0]?.text.slice(0, 300) ?? '没有失败结果'), way.replace(/\n/g, ' ').slice(0, 160))
   const hinted = model.results.find((r) => r.text.includes('关卡 1「两条路」') && r.text.includes('提示（'))?.text ?? ''
   const tip = hinted.slice(hinted.indexOf('提示（'))
-  s.step('Agent 连着失手 3 次后，diptych_look 带上解关器算出的下一步提示', check(fails.length >= 3 && !fails[0].text.includes('提示（') && fails[2].text.includes('提示（') && /1\. (你|请同伴（烬）)/.test(tip), tip.replace(/\n/g, ' ').slice(0, 160) || `失手 ${fails.length} 次，没看到提示`))
+  s.step('Agent 连着失手 3 次后，diptych_look 带上解关器算出的过关走法', check(fails.length >= 3 && /1\. (你|请同伴（烬）)/.test(tip), tip.replace(/\n/g, ' ').slice(0, 160) || `失手 ${fails.length} 次，没看到提示`))
   s.step('Agent 用 diptych_act 让凇自己走上中间层 (15,5)，说的话出现在游戏聊天里', err)
   await p.shot('web-agent-moved.png')
 
   // Ember holds button b; the Agent, waiting, hears gate A open, pulls
   // lever l and heads for its exit.
+  // Timed in the page: from the frame b goes down to the first frame
+  // Rime moves.
+  let woke = null
   err = await attempt(async () => {
+    await p.js(`const g = __q.game(); window.__wake = {}; const f = () => { const w = window.__wake; const W = g.W; const now = performance.now(); if (w.b == null && W.buttons.b) { w.b = now; w.x = W.heroes.rime.x; w.y = W.heroes.rime.y } if (w.b != null && w.go == null && Math.hypot(W.heroes.rime.x - w.x, W.heroes.rime.y - w.y) > 0.05) w.go = now; if (w.go == null) requestAnimationFrame(f) }; requestAnimationFrame(f); return true`)
     const r = await p.js(`return __q.game().assist('b')`)
     if (!r?.ok) throw new Error('烬去按钮 b：' + r?.text)
     await p.waitJS(`return __q.game().W.levers.l === true`, 40000)
     await p.waitJS(`return __q.game().W.gates.B === 1`, 5000)
+    woke = await p.js(`const w = window.__wake; return w.go - w.b`)
   })
   s.step('烬踩住按钮 b → 闸门 A 开 → 等待中的 Agent 被叫醒，去拉拉杆 l → 闸门 B 开', err,
     model.results.some((r) => r.text.includes('拉了一下')) ? 'Agent 的结果：到了拉杆 l，拉了一下' : '')
+  const pressed = model.results.find((r) => /同伴（烬）踩下了.色按钮 b/.test(r.text))?.text ?? ''
+  s.step('同伴踩下按钮就叫醒 diptych_wait：不用等到 30 秒超时，凇在 3 秒内动起来', check(pressed && !pressed.startsWith('（等到时间了') && woke > 0 && woke < 3000, `踩下 b 到凇起步 ${Math.round(woke)} ms`), `踩下 b 到凇起步 ${Math.round(woke)} ms`)
   await p.shot('web-coop.png')
 
   err = await attempt(async () => {
@@ -225,15 +235,21 @@ async function suite (s, cleanup) {
     if (!r?.ok) throw new Error('烬去出口：' + r?.text)
     await p.waitJS(`const g = __q.game(); return g.L.id === '2' && g.mode === 'play'`, 40000)
   })
-  s.step('两人都站到出口 → 过关；Agent 等到「过关」后用 next 开了第 2 关', err)
+  s.step('两人都站到出口 → 过关；几秒后游戏自己开了第 2 关', err)
+  const stopped = model.results.find((r) => /同伴停在\S+ \(\d+,\d+\)/.test(r.text))?.text ?? ''
+  s.step('同伴走了一段、站定下来，等待中的 Agent 也会被叫醒（「同伴停在左边底层 …」）', check(!!stopped, '没看到「同伴停在」'), stopped.match(/同伴停在[^\n]*/)?.[0] ?? '')
   const unlocked = await p.js(`return JSON.parse(localStorage.getItem('diptych:v1')).unlocked`).catch(() => 0)
   s.step('过关记录：第 2 关解锁（浏览器本地）', check(unlocked === 2, `unlocked=${unlocked}`))
   err = await attempt(async () => {
     await p.waitJS(`return __q.game().agent.active === false || true`, 1000)
-    for (const end = Date.now() + 20000; Date.now() < end && !model.results.some((r) => r.text.includes('关卡 2「升降台」')); await sleep(300));
+    for (const end = Date.now() + 30000; Date.now() < end && !model.results.some((r) => r.text.includes('关卡 2「升降台」')); await sleep(300));
+    if (!model.prompt.includes('第 2 关「升降台」开始了，接着一起玩吧')) throw new Error('游戏没有叫 Agent 回来')
     if (!model.results.some((r) => r.text.includes('关卡 2「升降台」'))) throw new Error('Agent 没看到第 2 关的地图')
+    if (model.prompt.split('来玩双联画吧').length !== 2) throw new Error('「叫 Agent 来玩」被发了不止一次')
   })
-  s.step('Agent 看到第 2 关的地图后结束这一轮', err)
+  s.step('Agent 过关后结束了这一轮：第 2 关开始几秒后游戏自动叫它回来接着玩（不用再点「叫 Agent 来玩」），它看了第 2 关的地图', err)
+  const map2 = model.results.find((r) => r.text.includes('关卡 2「升降台」'))?.text ?? ''
+  s.step('地图给每个开关标上颜色和位置，提醒 Agent 跟人说话时用颜色称呼、不报坐标', check(/a 按钮 \(\d+,\d+\)，.色，在..../.test(map2) && map2.includes('用颜色和位置称呼'), map2.slice(map2.indexOf('对象'), map2.indexOf('对象') + 160)), map2.match(/- a 按钮[^\n]*/)?.[0] ?? '')
   const log = await p.js('return __q.log()').catch(() => [])
   s.step('游戏聊天记下了 Agent 说的话和过关', check(log.some((l) => l.includes('谢啦！门开了，我去拉拉杆')) && log.some((l) => l.includes('过关')), log.join(' / ').slice(0, 300)))
   await p.shot('web-level2.png')

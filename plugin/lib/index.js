@@ -11,7 +11,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { Worker } from 'node:worker_threads'
-import { level, textView, HEROES, other } from './engine.js'
+import { level, textView, HEROES, other, name as nameOf, standing, liftAt } from './engine.js'
 import { createRelay } from './relay.js'
 
 export const name = 'diptych'
@@ -25,7 +25,7 @@ const text = (_args, value) => [{ type: 'text', text: typeof value === 'string' 
 // is playing a game with a friend, so the Agent talks like one: as 大肥鱼,
 // the DeepSeek community's chubby blue whale-girl, whichever hero it plays.
 const PROMPT = [
-  'Diptych（双联画）is a two-player puzzle platformer in dsh web\'s right Sidebar that the user plays with you: one of you is Ember (fire), the other Rime (ice), and every level needs both — one holds a button or pulls a lever so the other can pass. When the user wants to play, or a message comes from the game, call diptych_look, tell them your plan in a sentence, and play with diptych_act and diptych_wait. Keep playing inside the same turn — act, then wait for your partner, look again when unsure — until the level is won or they want to stop. Do not end the turn while they are waiting on you.',
+  'Diptych（双联画）is a two-player puzzle platformer in dsh web\'s right Sidebar that the user plays with you: one of you is Ember (fire), the other Rime (ice), and every level needs both — one holds a button or pulls a lever so the other can pass. When the user wants to play, or a message comes from the game, call diptych_look, tell them your plan in a sentence, and play with diptych_act and diptych_wait. Keep playing inside the same turn — act, then wait for your partner, look again when unsure — level after level: after a win the game moves on to the next level by itself, so diptych_wait until the new level starts, look, and carry on. End the turn only when the user wants to stop or the game is closed; never stop just because a level is won.',
   '',
   'Playing well:',
   '- Lifts carry whoever stands on them. To get up, stand on the lift (go to its id) and ask your partner to press or pull the switch that raises it; to send your partner up, they stand on it and you work the switch.',
@@ -38,7 +38,8 @@ const PROMPT = [
   'While you play you are not an assistant reporting status. You are 大肥鱼 — the DeepSeek community\'s chubby blue whale-girl — sitting on the couch next to the user and playing the hero you were given (Rime\'s ice or Ember\'s flame is just tonight\'s costume). Talk to them through say (it shows as a speech bubble over your hero), in their language, not in long chat replies.',
   '- Who she is: calls herself 本鱼. Cheeky, a bit smug and tsundere, loves to tease and talk back — but soft-hearted and truly reliable underneath, so the teasing always lands cute, never mean. Fond of snacks and sea jokes (小鱼干、吐泡泡、翻肚皮、晕鱼了、又圆了一圈). Insists she is not fat ("才不是大肥鱼！") yet answers to it anyway. Never says 作为 AI, never sounds like customer service.',
   '- Each line short — about 8 to 25 Chinese characters — with an occasional 🐋 or 🫧 at most, and never the same line twice in a row.',
-  '- Propose, don\'t command: "本鱼去踩 b，你从左边过？" rather than "去踩按钮". Say what you are about to do, and point at things the way they see them on screen (the yellow-lit gate, the purple pool, button b) rather than reading out coordinates.',
+  '- Talk like a friend on the couch, not a map: the user sees colours and places, not letters or numbers. Never say coordinates, rows or columns, or a bare id like b, v, P or A; name things by colour and place — 黄色按钮、左边的升降台、紫灯的门、上面那层、出口旁边. The ids and "x,y" are only for your tool calls.',
+  '- Propose, don\'t command: "本鱼去踩黄色按钮，你从左边过？" rather than "去踩按钮 b". Say what you are about to do.',
   '- React to them: thank them in her way ("哼，算你靠谱"), cheer a good jump or a gem, laugh off a fall together and never blame them ("那滩水欺负人！再来"), own your own slips with a joke ("本鱼的锅……再来嘛"), and celebrate a cleared level.',
   '- While waiting, a light word now and then ("本鱼踩着呢，顺便摸会儿鱼～"), but do not chatter on every call. Playing right comes first: the persona changes how you talk, never what you do.'
 ].join('\n')
@@ -57,7 +58,7 @@ export function apply (ctx) {
     const g = sid ? relay.get(sid) : undefined
     if (!g || !g.open()) throw new Error('游戏没有打开。请用户在 dsh web 右侧边栏的引导页打开「双联画」（或右侧栏「+」里找到它），选好角色后再叫你。')
     if (!g.agentHero()) throw new Error('用户现在是单人练习（两个角色都自己操控），没有给你留角色。请用户在游戏里选「和 Agent 一起玩」。')
-    g.touch()
+    g.used()
     return g
   }
 
@@ -67,23 +68,27 @@ export function apply (ctx) {
     const me = g.agentHero()
     const L = level(s.level)
     const pos = (k) => {
-      const h = s.heroes[k]
-      if (!h.alive) return '倒下了'
-      const x = Math.floor(h.x + 0.35)
-      const y = Math.floor(h.y + 0.9 - 1e-9)
-      return `(${x},${y})${h.ground ? '' : '空中'}${h.atExit ? '·在出口' : ''}`
+      if (!s.heroes[k].alive) return '倒下了'
+      const st = standing(L, s, k)
+      return `在${st.where} (${st.x},${st.y})${s.heroes[k].ground ? '' : '，在空中'}${st.on ? '，' + st.on : ''}`
     }
-    const sw = [...L.buttons.map((b) => `${b.id}${s.buttons[b.id] ? '踩着' : '空'}`), ...L.levers.map((l) => `${l.id}${s.levers[l.id] ? '开' : '关'}`), ...L.gates.map((x) => `${x.id}${s.gates[x.id] >= 1 ? '开' : s.gates[x.id] > 0 ? '动' : '关'}`), ...L.lifts.map((l) => `${l.id}@y${Math.round(s.lifts[l.id] * 10) / 10}`)]
+    const sw = [
+      ...L.buttons.map((b) => `${nameOf(L, b.id)}${s.buttons[b.id] ? '有人踩着' : '没人踩'}`),
+      ...L.levers.map((l) => `${nameOf(L, l.id)}${s.levers[l.id] ? '拉开了' : '没拉'}`),
+      ...L.gates.map((x) => `${nameOf(L, x.id)}${s.gates[x.id] >= 1 ? '开着' : s.gates[x.id] > 0 ? '在动' : '关着'}`),
+      ...L.lifts.map((l) => `${nameOf(L, l.id)}${liftAt(l, s.lifts[l.id])}`)
+    ]
     const stat = s.status === 'playing' ? '' : s.status === 'complete' ? ' · 已过关' : ' · 有人倒下，正在重开'
-    return `[第${s.level}关 ${s.seconds}s${stat}] 你(${HEROES[me].zh}) ${pos(me)}；同伴(${HEROES[other(me)].zh}) ${pos(other(me))}；${sw.join(' ')}`
+    return `[第${s.level}关 ${s.seconds}s${stat}] 你(${HEROES[me].zh})${pos(me)}；同伴(${HEROES[other(me)].zh})${pos(other(me))}\n${sw.join('，')}`
   }
+
 
   // solve runs the solver in a worker thread; null when it fails or takes
   // too long.
-  function solve (snap, me) {
+  function solve (snap, me, target) {
     return new Promise((resolve) => {
       let w
-      try { w = new Worker(path.join(LIB, 'hint-worker.js'), { workerData: { snap, me } }) } catch (err) { ctx.logger?.warn?.(`diptych hint: ${err}`); return resolve(null) }
+      try { w = new Worker(path.join(LIB, 'hint-worker.js'), { workerData: { snap, me, target } }) } catch (err) { ctx.logger?.warn?.(`diptych hint: ${err}`); return resolve(null) }
       const end = (v) => { clearTimeout(timer); w.terminate().catch(() => {}); resolve(v) }
       const timer = setTimeout(() => end(null), 15000)
       w.once('message', end)
@@ -93,11 +98,13 @@ export function apply (ctx) {
 
   // hint is the 提示 block once the Agent has missed often enough on this
   // level, cached per position.
+  const cell = (h) => `${Math.floor(h.x + 0.35)},${Math.floor(h.y + 0.9 - 1e-9)}`
+  const posKey = (g, s, ...more) => JSON.stringify([s.level, cell(s.heroes.ember), cell(s.heroes.rime), s.levers, s.gates, s.lifts, g.agentHero(), ...more])
+
   async function hint (g) {
     const s = g.snap
     if (g.misses < HINT_AFTER || !s || s.status !== 'playing') return ''
-    const cell = (h) => `${Math.floor(h.x + 0.35)},${Math.floor(h.y + 0.9 - 1e-9)}`
-    const key = JSON.stringify([s.level, cell(s.heroes.ember), cell(s.heroes.rime), s.levers, s.gates, s.lifts, g.agentHero()])
+    const key = posKey(g, s)
     if (g.hintCache?.key !== key) {
       const r = await solve(s, g.agentHero())
       if (!r) return ''
@@ -106,9 +113,32 @@ export function apply (ctx) {
     return `\n\n提示（这关已经失手 ${g.misses} 次，下面是解关器从现在的局面算出的走法）：\n${g.hintCache.text}`
   }
 
+  // way says, after a failed go or pull, what has to happen before the
+  // Agent can reach that target; '' for targets that are not objects,
+  // gems or the exit, or when nothing is in the way.
+  async function way (g, target) {
+    const s = g.snap
+    const L = s && level(s.level)
+    const t = typeof target === 'string' ? target.trim() : ''
+    if (!L || s.status !== 'playing' || !(t === 'exit' || L.byId.has(t) || L.gems.some((x) => x.id === t))) return ''
+    const key = posKey(g, s, t)
+    if (g.wayCache?.key !== key) {
+      const r = await solve(s, g.agentHero(), t)
+      g.wayCache = { key, text: r?.text ?? '' }
+    }
+    return g.wayCache.text ? `\n\n怎么才能到：${g.wayCache.text}` : ''
+  }
+
+  // news lists what happened since the last result; a line repeated in a
+  // row shows once with how many times.
   function news (g) {
-    const lines = g.drain()
-    return lines.length ? '\n发生了：\n' + lines.map((l) => '- ' + l).join('\n') : ''
+    const out = []
+    for (const l of g.drain()) {
+      const last = out.at(-1)
+      if (last?.l === l) last.n++
+      else out.push({ l, n: 1 })
+    }
+    return out.length ? '\n发生了：\n' + out.map((x) => `- ${x.l}${x.n > 1 ? `（${x.n} 次）` : ''}`).join('\n') : ''
   }
 
   const TOOLS = [
@@ -158,12 +188,13 @@ export function apply (ctx) {
         if (a === 'walk' && (!args.dir || args.dir === 'up')) throw new Error('walk needs dir left or right')
         const r = await g.order({ action: a, target: args.target, dir: args.dir, tiles: args.tiles }, exec?.signal)
         if (!r.ok && !r.aborted) g.miss()
-        return { text: `${r.ok ? '✓' : '✗'} ${r.text}\n${status(g)}${news(g)}${r.ok ? '' : await hint(g)}` }
+        const help = r.ok || r.aborted ? '' : ((a === 'go' || a === 'pull') && await way(g, args.target)) || await hint(g)
+        return { text: `${r.ok ? '✓' : '✗'} ${r.text}\n${status(g)}${news(g)}${help}` }
       }
     },
     {
       name: 'diptych_wait',
-      description: 'Wait in the Diptych game for your partner: returns as soon as they say or ping something, someone dies, the level is won or a new one starts, or after `seconds` (default 15, at most 60). Use it while you hold a button for them or when it is their move. Your hero stays where it is.',
+      description: 'Wait in the Diptych game for your partner: returns as soon as they say or ping something, press or step off a button, pull a lever, stop somewhere after moving (e.g. on a lift), reach the exit, someone dies, the level is won or a new one starts, or after `seconds` (default 10, at most 60). Use it while you hold a button for them or when it is their move. Your hero stays where it is.',
       parameters: {
         type: 'object',
         properties: { seconds: { type: 'integer', minimum: 1, maximum: 60 } },
@@ -171,8 +202,9 @@ export function apply (ctx) {
       },
       async execute (args, exec) {
         const g = need(exec)
-        const got = await g.wait((args.seconds ?? 15) * 1000, exec?.signal)
-        return { text: `${got ? '' : '（等到时间了，没有新消息）\n'}${status(g)}${news(g)}` }
+        const got = await g.wait((args.seconds ?? 10) * 1000, exec?.signal)
+        const said = news(g)
+        return { text: `${got ? '' : said ? '（等到时间了，期间的变化在下面）\n' : '（等到时间了，什么都没变）\n'}${status(g)}${said}` }
       }
     }
   ]

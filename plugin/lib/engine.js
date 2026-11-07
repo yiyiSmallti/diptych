@@ -25,6 +25,68 @@ export const HEROES = {
 export const KINDS = ['ember', 'rime']
 export const other = (k) => (k === 'ember' ? 'rime' : 'ember')
 
+// Each button or lever has a colour; the gates and lifts it drives show
+// lamps in that colour. The page draws them, and the Agent names things
+// by them when it talks to the user.
+export const LINK_COLORS = [['#ffd166', '黄'], ['#7ae582', '绿'], ['#c77dff', '紫'], ['#ff8fab', '粉'], ['#4cc9f0', '蓝'], ['#f4a261', '橙'], ['#b8f2e6', '薄荷绿'], ['#ff6b6b', '红'], ['#a0c4ff', '浅蓝']]
+
+export function links (L) {
+  const m = new Map()
+  let i = 0
+  for (const o of [...L.buttons, ...L.levers].sort((a, b) => a.id.localeCompare(b.id))) {
+    const [hex, zh] = LINK_COLORS[i++ % LINK_COLORS.length]
+    m.set(o.id, { hex, zh })
+  }
+  return m
+}
+
+// lamp is the colour word for a gate or lift: its switches' colours.
+export function lamp (L, o) {
+  const m = links(L)
+  return o.by.map((id) => m.get(id)?.zh).filter(Boolean).join('/') + '灯'
+}
+
+// name says an object the way the user sees it: 黄色按钮 b, 紫灯闸门 A.
+export function name (L, id) {
+  const o = L.byId.get(id)
+  if (!o) return id
+  if (o.type === 'button' || o.type === 'lever') return `${links(L).get(id)?.zh ?? ''}色${o.type === 'button' ? '按钮' : '拉杆'} ${id}`
+  return `${lamp(L, o)}${o.type === 'gate' ? '闸门' : '升降台'} ${id}`
+}
+
+// standing says where a hero in a snapshot is, in words, and what it
+// stands on: 踩着黄色按钮 a, 站在黄/绿灯升降台 P 上, 站在出口.
+export function standing (L, s, k) {
+  const h = s.heroes[k]
+  const c = cellOfSnap(h)
+  const at = (o) => o.x === c.x && o.y === c.y
+  const on = L.buttons.find(at) ?? L.levers.find(at)
+  const lift = h.ground ? L.lifts.find((l) => c.x >= l.x && c.x < l.x + l.w && Math.round(s.lifts?.[l.id] ?? l.y) === c.y + 1) : null
+  const what = on ? (on.type === 'button' ? `踩着${name(L, on.id)}` : `站在${name(L, on.id)} 旁`) : lift ? `站在${name(L, lift.id)} 上` : h.atExit ? '站在出口' : ''
+  return { x: c.x, y: c.y, where: where(L, c.x, c.y), on: what }
+}
+
+// liftAt says where a lift is: 在顶, 在底 or 在半路.
+export function liftAt (l, y) {
+  if (Math.abs(y - l.y) < 0.05) return '在底'
+  if (Math.abs(y - (l.y + l.dy)) < 0.05) return '在顶'
+  return '在半路（正在动）'
+}
+
+// when says what makes a gate or lift act, the way it reads on screen:
+// 有人踩着黄色按钮 a 或 绿色拉杆 v 拉开.
+export function when (L, o) {
+  const one = (id) => (L.byId.get(id)?.type === 'button' ? `有人踩着${name(L, id)}` : `${name(L, id)} 拉开`)
+  return o.by.map(one).join(o.all ? ' 并且 ' : ' 或 ')
+}
+
+// where says roughly where a cell is, the way a player would: 左边底层.
+export function where (L, x, y) {
+  const h = x < L.w / 3 ? '左边' : x >= (L.w * 2) / 3 ? '右边' : '中间'
+  const v = y < L.h / 3 ? '高处' : y >= (L.h * 2) / 3 ? '底层' : '中层'
+  return h + v
+}
+
 const LIQUIDS = { '^': 'lava', '~': 'frost', '%': 'ooze' }
 export const LIQUID_ZH = { lava: '熔岩', frost: '寒潭', ooze: '毒沼' }
 const deadly = (kind, liquid) => !!liquid && liquid !== HEROES[kind].safe
@@ -844,23 +906,26 @@ export function textView (L, s, me, extra = {}) {
     for (const k of [youK, pal]) {
       const h = s.heroes[k]
       const c = cellOfSnap(h)
-      out.push(`${k === youK ? '你' : '同伴'}（${HEROES[k].zh}）：${h.alive ? `在 (${c.x},${c.y})${h.ground ? '' : '，在空中'}${h.atExit ? '，站在出口' : ''}` : '倒下了'}`)
+      const st = h.alive ? standing(L, s, k) : null
+      out.push(`${k === youK ? '你' : '同伴'}（${HEROES[k].zh}）：${st ? `在${st.where} (${c.x},${c.y})${h.ground ? '' : '，在空中'}${st.on ? '，' + st.on : ''}` : '倒下了'}`)
     }
   }
   const objs = []
-  for (const b of L.buttons) objs.push(`${b.id} 按钮 (${b.x},${b.y})：${s?.buttons?.[b.id] ? '被踩着' : '没人踩'}；站上去才算按下，离开就弹起`)
-  for (const l of L.levers) objs.push(`${l.id} 拉杆 (${l.x},${l.y})：${s?.levers?.[l.id] ? '已拉下（开）' : '未拉（关）'}；站在上面拉一下切换`)
-  const drivers = (o) => o.by.length > 1 ? (o.all ? o.by.join(' 和 ') + ' 都' : o.by.join(' 或 ') + ' ') : o.by[0] + ' '
+  const lk = links(L)
+  const col = (id) => lk.get(id)?.zh ?? ''
+  for (const b of L.buttons) objs.push(`${b.id} 按钮 (${b.x},${b.y})，${col(b.id)}色，在${where(L, b.x, b.y)}：${s?.buttons?.[b.id] ? '被踩着' : '没人踩'}；站上去才算按下，离开就弹起`)
+  for (const l of L.levers) objs.push(`${l.id} 拉杆 (${l.x},${l.y})，${col(l.id)}色，在${where(L, l.x, l.y)}：${s?.levers?.[l.id] ? '已拉下（开）' : '未拉（关）'}；站在上面拉一下切换`)
+
   for (const g of L.gates) {
     const f = s?.gates?.[g.id] ?? 0
-    objs.push(`${g.id} 闸门 x=${g.x}${g.w > 1 ? '..' + (g.x + g.w - 1) : ''} y=${g.y}..${g.y + g.h - 1}：${f >= 1 ? '开着' : f > 0 ? '正在动' : '关着'}；${g.invert ? `${drivers(g)}打开时它关上` : `${drivers(g)}打开时它开`}`)
+    objs.push(`${g.id} 闸门，${lamp(L, g)}，在${where(L, g.x, g.y + g.h - 1)}，x=${g.x}${g.w > 1 ? '..' + (g.x + g.w - 1) : ''} y=${g.y}..${g.y + g.h - 1}：${f >= 1 ? '开着' : f > 0 ? '正在动' : '关着'}；${g.invert ? `平时开着，${when(L, g)}时关上` : `${when(L, g)}时打开，否则关上`}`)
   }
   for (const l of L.lifts) {
     const y = s?.lifts?.[l.id] ?? l.y
-    objs.push(`${l.id} 升降台 x=${l.x}..${l.x + l.w - 1}：现在在 y=${Math.round(y * 10) / 10}（底 y=${l.y}，顶 y=${l.y + l.dy}）；${l.invert ? `平时在顶，${drivers(l)}打开时降到底` : `${drivers(l)}打开时升到顶，否则回到底`}`)
+    objs.push(`${l.id} 升降台，${lamp(L, l)}，在${where(L, l.x, l.y)}，x=${l.x}..${l.x + l.w - 1}：现在${liftAt(l, y)}（底 y=${l.y}、站上去的人在 y=${l.y - 1}；顶 y=${l.y + l.dy}、站上去的人在 y=${l.y + l.dy - 1}）；站在上面的人跟着它上下；${l.invert ? `平时在顶，${when(L, l)}时降到底` : `${when(L, l)}时升到顶，否则回到底`}`)
   }
   if (objs.length) {
-    out.push('对象：')
+    out.push('对象（字母和坐标只给你自己导航用；跟同伴说话时用颜色和位置称呼它们，比如「黄色按钮」「左边的升降台」「紫灯的门」）：')
     for (const o of objs) out.push('- ' + o)
   }
   const gems = L.gems.filter((g) => g.kind === youK)

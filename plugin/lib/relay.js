@@ -3,12 +3,13 @@
 // brings the latest snapshot, what happened, and the results of orders;
 // it takes away the Agent's new orders and lines to say. The Agent's
 // tools (lib/index.js) wait on the results here.
-import { HEROES, LIQUID_ZH, level } from './engine.js'
+import { HEROES, LIQUID_ZH, level, name, standing } from './engine.js'
 
 const OPEN_MS = 4000 // a tab that has not synced for this long is gone
 const ACTIVE_MS = 25000 // after a tool call, the Agent counts as in the game
 const ORDER_MS = 60000
 const INBOX = 60
+const SETTLE_MS = 400 // a partner standing still this long after moving wakes a waiting Agent
 
 export function createRelay () {
   const games = new Map()
@@ -41,6 +42,11 @@ class Game {
     // level. Past HINT_AFTER the tools add the solver's next moves.
     this.misses = 0
     this.hintCache = null
+    // The partner's last resting place and who holds which button, so a
+    // waiting Agent hears when the user has done their part.
+    this.mate = null
+    this.held = {}
+    this.lastTool = 0
   }
 
   miss () { this.misses++ }
@@ -48,6 +54,12 @@ class Game {
   open () { return !!this.snap && Date.now() - this.lastSync < OPEN_MS }
   agentHero () { return this.agent === 'ember' || this.agent === 'rime' ? this.agent : null }
   touch () { this.activeUntil = Date.now() + ACTIVE_MS }
+  // used marks an Agent tool call; the tab uses the gap since to tell
+  // whether the Agent is still in its turn.
+  used () {
+    this.lastTool = Date.now()
+    this.touch()
+  }
   reach () { return this.reachList }
 
   say (text) {
@@ -122,11 +134,21 @@ class Game {
   describe (ev) {
     const me = this.agentHero()
     const who = (k) => (k === me ? '你' : k ? `同伴（${HEROES[k]?.zh ?? k}）` : '有人')
+    const L = level(this.snap?.level)
+    const nm = (id) => (L ? name(L, id) : id)
     switch (ev.type) {
-      case 'lever': return [`${who(ev.by)}把拉杆 ${ev.id} ${ev.on ? '拉开' : '拉回'}了`, ev.by !== me]
-      case 'button': return ev.on ? [`${who(ev.by)}踩下了按钮 ${ev.id}`, false] : [`按钮 ${ev.id} 弹起了`, false]
-      case 'gate': return [`闸门 ${ev.id} ${ev.open ? '开了' : '关了'}`, false]
-      case 'lift': return [`升降台 ${ev.id} ${ev.up ? '升到顶' : '降到底'}了`, false]
+      case 'lever': return [`${who(ev.by)}把${nm(ev.id)} ${ev.on ? '拉开' : '拉回'}了`, ev.by !== me]
+      case 'button': {
+        if (ev.on) {
+          this.held[ev.id] = ev.by
+          return [`${who(ev.by)}踩下了${nm(ev.id)}`, ev.by !== me]
+        }
+        const by = this.held[ev.id]
+        delete this.held[ev.id]
+        return by && by !== me ? [`${who(by)}松开了${nm(ev.id)}`, true] : [`${nm(ev.id)} 弹起了`, false]
+      }
+      case 'gate': return [`${nm(ev.id)} ${ev.open ? '开了' : '关了'}`, false]
+      case 'lift': return [`${nm(ev.id)} ${ev.up ? '升到顶' : '降到底'}了`, false]
       case 'gem': return [`${who(ev.by)}拿到宝石 ${ev.id}`, false]
       case 'exit': return ev.at ? [`${who(ev.who)}站到出口了`, ev.who !== me] : null
       case 'died':
@@ -135,13 +157,43 @@ class Game {
       case 'complete': return [`过关！用时 ${ev.seconds}s，宝石 ${ev.gems}/${ev.of}`, true]
       case 'level': {
         if (!ev.restart) { this.misses = 0; this.hintCache = null }
-        const L = level(ev.id)
-        return [`${ev.restart ? '重新开始' : '开始'}第 ${ev.id} 关「${L?.name ?? ''}」，你是${HEROES[me]?.zh ?? '?'}`, true]
+        this.mate = null
+        this.held = {}
+        const NL = level(ev.id)
+        return [`${ev.restart ? '重新开始' : '开始'}第 ${ev.id} 关「${NL?.name ?? ''}」，你是${HEROES[me]?.zh ?? '?'}`, true]
       }
       case 'ping': return [`同伴在 (${ev.x},${ev.y})${ev.label ? `（${ev.label}）` : ''}打了个标记，想让你看这里`, true]
       case 'chat': return [`同伴说：「${String(ev.text ?? '').slice(0, 200)}」`, true]
       default: return null
     }
+  }
+
+  // watchMate tells a waiting Agent when its partner, having moved a
+  // tile or more, has stood still on the ground for SETTLE_MS: they have
+  // likely done their part (stood on a lift, reached a spot) without
+  // saying so.
+  watchMate (now) {
+    const me = this.agentHero()
+    const s = this.snap
+    const h = me && s.status === 'playing' ? s.heroes?.[me === 'ember' ? 'rime' : 'ember'] : null
+    if (!h?.alive) { this.mate = null; return }
+    const x = +h.x
+    const y = +h.y
+    const m = this.mate
+    if (!m) { this.mate = { x, y, ax: x, ay: y, still: now }; return }
+    if (Math.abs(x - m.x) > 0.02 || Math.abs(y - m.y) > 0.02 || !h.ground) {
+      m.x = x
+      m.y = y
+      m.still = now
+      return
+    }
+    if (now - m.still < SETTLE_MS || Math.hypot(x - m.ax, y - m.ay) < 1) return
+    m.ax = x
+    m.ay = y
+    const L = level(s.level)
+    if (!L) return
+    const st = standing(L, s, me === 'ember' ? 'rime' : 'ember')
+    this.push(`同伴停在${st.where} (${st.x},${st.y})${st.on ? '，' + st.on : ''}`, true)
   }
 
   sync (body) {
@@ -160,13 +212,14 @@ class Game {
       const d = ev && typeof ev === 'object' ? this.describe(ev) : null
       if (d) this.push(d[0], d[1])
     }
+    if (body.snapshot && typeof body.snapshot === 'object') this.watchMate(now)
     for (const r of Array.isArray(body.results) ? body.results : []) {
       this.pending.get(r?.id)?.({ ok: !!r.ok, text: String(r.text ?? '') })
     }
     const out = {
       commands: this.commands.splice(0),
       said: this.said.splice(0),
-      agent: { active: now < this.activeUntil || this.pending.size > 0 || this.waiters.size > 0, busy: this.pending.size > 0, waiting: this.waiters.size > 0 }
+      agent: { active: now < this.activeUntil || this.pending.size > 0 || this.waiters.size > 0, busy: this.pending.size > 0, waiting: this.waiters.size > 0, idle: this.lastTool ? now - this.lastTool : null }
     }
     return out
   }

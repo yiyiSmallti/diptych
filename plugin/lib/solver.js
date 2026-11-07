@@ -6,7 +6,7 @@
 //
 // The host uses it for hints when the Agent keeps failing (lib/index.js);
 // e2e/solver.mjs uses it to prove every level can be cleared.
-import { level, createWorld, step, Pilot, moving, reachable, centreCell, KINDS, HEROES } from './engine.js'
+import { level, createWorld, step, Pilot, moving, reachable, centreCell, KINDS, HEROES, name, where } from './engine.js'
 
 export function clone (W) {
   return {
@@ -132,13 +132,13 @@ export function worldFrom (s) {
 export function describeStep (L, st, me) {
   const who = st.who === me ? '你' : `请同伴（${HEROES[st.who].zh}）`
   const t = st.go
-  if (typeof t === 'object') return `${who}退到 (${t.x},${t.y}) 让开`
+  if (typeof t === 'object') return `${who}退到${where(L, t.x, t.y)} (${t.x},${t.y}) 让开`
   if (t === 'exit') return `${who}去出口`
   const o = L.byId.get(t)
-  if (st.use) return `${who}去拉拉杆 ${t}`
-  if (o?.type === 'button') return `${who}去踩住按钮 ${t}`
-  if (o?.type === 'lift') return `${who}站上升降台 ${t}`
-  if (o?.type === 'gate') return `${who}走到闸门 ${t} 旁边`
+  if (st.use) return `${who}去拉${name(L, t)}`
+  if (o?.type === 'button') return `${who}去踩住${name(L, t)}`
+  if (o?.type === 'lift') return `${who}站上${name(L, t)}`
+  if (o?.type === 'gate') return `${who}走到${name(L, t)}旁边`
   return `${who}去 ${t}`
 }
 
@@ -153,4 +153,23 @@ export function hint (s, me, { ms = 1500, steps = 3 } = {}) {
   const next = r.path.slice(0, steps).map((st, i) => `${i + 1}. ${describeStep(W.L, st, me)}`)
   const more = r.path.length > steps ? `（之后还有 ${r.path.length - steps} 步，做完再 look 会给新的提示）` : ''
   return { ok: true, path: r.path, text: `${next.join('；')}${more}。每一步做完就原地站住，等下一步的人做完。` }
+}
+
+// route finds what has to happen before `me` can reach `target` (an
+// object, a gem or "exit"): the moves until it shows among the places
+// `me` can reach. null when it already can, or the game is not in play.
+export function route (s, me, target, { ms = 2500, steps = 4 } = {}) {
+  if (!s || s.status !== 'playing') return null
+  const W = worldFrom(s)
+  if (!W) return null
+  const L = W.L
+  const gem = L.gems.find((g) => g.id === target)
+  const label = target === 'exit' ? '出口' : gem ? `宝石 ${target}` : name(L, target)
+  const can = (C) => (reachable(C, me) ?? []).includes(target)
+  if (can(W)) return null
+  const r = search(W, { goal: can, deadline: performance.now() + ms })
+  if (!r.ok) return { ok: false, text: `解关器从现在的局面没找到办法让你走到${label}。${gem ? '宝石可选，不拿也能过关。' : '如果卡死了，可以跟同伴商量用 restart 重开这一关。'}` }
+  const next = r.path.slice(0, steps).map((st, i) => `${i + 1}. ${describeStep(L, st, me)}`)
+  const more = r.path.length > steps ? `（之后还有 ${r.path.length - steps} 步）` : ''
+  return { ok: true, text: `要走到${label}，得先：${next.join('；')}${more}。做完这些你就走得到了。` }
 }

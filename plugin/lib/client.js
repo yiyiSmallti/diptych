@@ -89,9 +89,6 @@ window.__ModuleLoader__.load({
       frost: { deep: '#123f8f', mid: '#2f8fe8', top: '#a6e6ff', glow: '#4cb8ff', fleck: '#ffffff' },
       ooze: { deep: '#341270', mid: '#7a3fe0', top: '#cfa3ff', glow: '#9b5cff', fleck: '#f1e2ff' }
     }
-    // Each button or lever gets a colour; the gates and lifts it drives show
-    // lamps in that colour, so who opens what can be read at a glance.
-    const LINKS = ['#ffd166', '#7ae582', '#c77dff', '#ff8fab', '#4cc9f0', '#f4a261', '#b8f2e6', '#ff6b6b', '#a0c4ff']
 
     const hash = (x, y, k = 0) => {
       let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(k | 0, 1442695041)
@@ -103,6 +100,7 @@ window.__ModuleLoader__.load({
       return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`
     }
     const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
+    const KEEP_MS = 8000 // how long a new level waits for the Agent before calling it back
 
     const glowCache = new Map()
     function glowSprite (color) {
@@ -516,6 +514,11 @@ window.__ModuleLoader__.load({
         this.resize()
         this.updateChrome()
         this.outEvents.push({ type: 'level', id, restart })
+        if (!restart) {
+          this.levelAt = performance.now()
+          this.nudge = !!this.carry && this.duo
+          this.carry = false
+        }
         if (!restart && !quiet) this.addLog('s', `第 ${id} 关「${this.L.name}」开始`)
         this.root.focus()
         this.saveRun()
@@ -620,6 +623,23 @@ window.__ModuleLoader__.load({
         // message, which brings it in.
         const E = this.E
         sendToSession(this.sessionId, `（在双联画里对你说）${text}\n——我在玩${E.HEROES[this.human].zh}，你是${E.HEROES[this.agentKind].zh}，第 ${this.levelId} 关。`).catch((err) => this.addLog('s', '没发出去：' + err.message))
+      }
+
+      // keepAgent brings the Agent back for a new level when it played the
+      // last one but has ended its turn since, so the user does not invite
+      // it again every level. A tool call or a wait since the level began
+      // means it is still playing.
+      keepAgent () {
+        if (!this.nudge) return
+        if (this.mode !== 'play' || !this.duo) { this.nudge = false; return }
+        const since = performance.now() - this.levelAt
+        const a = this.agent
+        if (a.busy || a.waiting || (a.idle != null && a.idle < since)) { this.nudge = false; return }
+        if (since < KEEP_MS) return
+        this.nudge = false
+        const E = this.E
+        const text = `第 ${this.L.id} 关「${this.L.name}」开始了，接着一起玩吧！我还是${E.HEROES[this.human].zh}，你是${E.HEROES[this.agentKind].zh}。`
+        sendToSession(this.sessionId, text).then(() => this.addLog('s', '已经叫 Agent 回来接着玩'), (err) => this.addLog('s', '没叫回 Agent：' + err.message))
       }
 
       invite () {
@@ -786,6 +806,7 @@ window.__ModuleLoader__.load({
           this.syncErr = ''
           const was = this.agent.active
           this.agent = r.agent ?? this.agent
+          this.keepAgent()
           if (was !== this.agent.active) {
             this.updateChrome()
             if (this.agent.active && this.mode === 'play') this.addLog('s', `Agent 进来了，在玩${E.HEROES[this.agentKind].zh}`)
@@ -870,6 +891,9 @@ window.__ModuleLoader__.load({
       won () {
         const E = this.E
         const W = this.W
+        // The Agent was playing this level with the user: the next one
+        // carries on with it (see keepAgent).
+        this.carry = this.duo && (this.agent.busy || this.agent.waiting || (this.agent.idle != null && this.agent.idle < 30000))
         const i = E.LEVELS.findIndex((d) => d.id === this.levelId)
         const seconds = Math.floor(W.tick * E.TICK)
         const rec = { seconds, gems: W.taken.size, of: W.L.gems.length }
@@ -903,9 +927,9 @@ window.__ModuleLoader__.load({
       prepare (L) {
         if (this.prepared === L) return
         this.prepared = L
-        this.links = new Map()
-        let i = 0
-        for (const o of [...L.buttons, ...L.levers].sort((a, b) => a.id.localeCompare(b.id))) this.links.set(o.id, LINKS[i++ % LINKS.length])
+        // Each button or lever's colour (engine.links); the gates and lifts
+        // it drives show lamps in it, so who opens what reads at a glance.
+        this.links = new Map([...this.E.links(L)].map(([id, c]) => [id, c.hex]))
         this.runs = []
         for (let y = 0; y < L.h; y++) {
           for (let x = 0; x < L.w;) {

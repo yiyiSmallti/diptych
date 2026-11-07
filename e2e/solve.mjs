@@ -4,6 +4,7 @@
 // be reached, and that it needs both heroes: neither reaches its exit
 // while the other stands still.
 import { LEVELS, engine, solveLevel, describe, hint } from './solver.mjs'
+import { route } from '../plugin/lib/solver.js'
 
 const { TICK, createWorld, level, step, snapshot } = engine
 
@@ -34,5 +35,16 @@ export async function solve (rep) {
   W.levers.v = true
   for (let i = 0; i < 200; i++) step(W, {})
   const h = hint(snapshot(W), 'rime')
-  s.step('提示：第 2 关凇被留在底下时，解关器让同伴先拉回 v、凇站上升降台 P、再拉 v', h?.ok && /1\. 请同伴（烬）去拉拉杆 v；2\. 你站上升降台 P；3\. 请同伴（烬）去拉拉杆 v/.test(h.text) ? null : new Error(h?.text ?? '没有提示'), h?.text)
+  s.step('提示：第 2 关凇被留在底下时，解关器让同伴先拉回 v、凇站上升降台 P、再拉 v', h?.ok && /1\. 请同伴（烬）去拉绿色拉杆 v；2\. 你站上黄\/绿灯升降台 P；3\. 请同伴（烬）去拉绿色拉杆 v/.test(h.text) ? null : new Error(h?.text ?? '没有提示'), h?.text)
+
+  // What a failed go gets, from another real stuck spot: Rime (the Agent)
+  // already at her exit up top, the lift locked up by lever v, and the
+  // user asking her to fetch gem r2 down in the lift shaft.
+  const G = createWorld(level('2'))
+  Object.assign(G.heroes.rime, { x: 2.2, y: 2.1 })
+  Object.assign(G.heroes.ember, { x: 15.2, y: 2.1 })
+  G.levers.v = true
+  for (let i = 0; i < 200; i++) step(G, {})
+  const w = route(snapshot(G), 'rime', 'r2')
+  s.step('走不到时说明缺什么：第 2 关凇想拿竖井里的宝石 r2，解关器说要先请同伴拉回绿色拉杆 v', w?.ok && /要走到宝石 r2，得先：1\. 请同伴（烬）去拉绿色拉杆 v/.test(w.text) ? null : new Error(w?.text ?? '没有结果'), w?.text)
 }
